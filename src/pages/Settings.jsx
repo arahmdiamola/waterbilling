@@ -85,11 +85,14 @@ function Settings() {
     // Generate a temporary link to download
     const token = localStorage.getItem('token');
     fetch('/api/database/backup', {
-      method: 'POST',
+      method: 'GET',
       headers: { 'Authorization': `Bearer ${token}` }
     })
-    .then(res => {
-      if (!res.ok) throw new Error('Failed to fetch backup');
+    .then(async res => {
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to fetch backup');
+      }
       return res.blob();
     })
     .then(blob => {
@@ -103,7 +106,7 @@ function Settings() {
       window.URL.revokeObjectURL(url);
       addToast('Backup downloaded successfully!');
     })
-    .catch(() => addToast('Failed to download backup', 'error'))
+    .catch((err) => addToast(err.message || 'Failed to download backup', 'error'))
     .finally(() => setDbDownloading(false));
   };
 
