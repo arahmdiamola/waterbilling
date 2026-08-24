@@ -1336,7 +1336,10 @@ app.post('/api/readings/import', (req, res) => {
 const frontendPath = path.join(__dirname, '../dist');
 app.use(express.static(frontendPath));
 
-app.get('*', (req, res) => {
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/')) {
+    return next();
+  }
   res.sendFile(path.join(frontendPath, 'index.html'));
 });
 
