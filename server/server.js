@@ -34,8 +34,8 @@ app.post('/api/auth/login', async (req, res) => {
     const validPassword = bcrypt.compareSync(password, user.password_hash);
     if (!validPassword) return res.status(401).json({ error: 'Invalid username or password' });
 
-    const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
-    res.json({ token, username: user.username, role: user.role });
+    const token = jwt.sign({ id: user.id, username: user.username, role: user.role, assigned_purok: user.assigned_purok || null }, JWT_SECRET, { expiresIn: '24h' });
+    res.json({ token, username: user.username, role: user.role, assigned_purok: user.assigned_purok || null });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
