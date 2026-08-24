@@ -19,6 +19,11 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback-super-secret-key-change-i
 
 const PORT = process.env.PORT || 5000;
 
+// --- Health Check for UptimeRobot ---
+app.get('/api/ping', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 // --- Auth Endpoints ---
 app.post('/api/auth/login', (req, res) => {
   const { username, password } = req.body;
