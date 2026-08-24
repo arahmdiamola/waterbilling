@@ -7,6 +7,8 @@ function Dashboard() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const userRole = localStorage.getItem('role') || 'ADMIN';
+  const assignedPurok = localStorage.getItem('assigned_purok') || '';
 
   useEffect(() => {
     const fetchDashboard = async () => {
@@ -53,7 +55,7 @@ function Dashboard() {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">Dashboard Overview</h1>
+        <h1 className="page-title">{userRole === 'STAFF' && assignedPurok ? `${assignedPurok} - Dashboard` : 'Dashboard Overview'}</h1>
       </div>
 
       <div className="stats-grid" style={{ marginBottom: '2rem' }}>

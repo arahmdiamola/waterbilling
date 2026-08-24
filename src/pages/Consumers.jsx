@@ -19,9 +19,9 @@ function Consumers() {
   const tagRef = useRef(null);
   
   // Add Consumer form state
-  const [formData, setFormData] = useState({ name: '', meter_number: '', address: '', contact_number: '' });
+  const [formData, setFormData] = useState({ name: '', meter_number: '', address: '', contact_number: '', purok: '' });
   const [showEditModal, setShowEditModal] = useState(false);
-  const [editForm, setEditForm] = useState({ id: '', name: '', meter_number: '', address: '', contact_number: '' });
+  const [editForm, setEditForm] = useState({ id: '', name: '', meter_number: '', address: '', contact_number: '', purok: '' });
   
   // Batch Upload state
   const [csvFile, setCsvFile] = useState(null);
@@ -104,7 +104,7 @@ function Consumers() {
       if (response.ok) {
         addToast('Consumer added successfully');
         setShowAddModal(false);
-        setFormData({ name: '', meter_number: '', address: '', contact_number: '' });
+        setFormData({ name: '', meter_number: '', address: '', contact_number: '', purok: '' });
         fetchConsumers();
       } else {
         const err = await response.json();
@@ -247,6 +247,7 @@ function Consumers() {
                 <tr>
                   <th>ID</th>
                   <th>Name</th>
+                  <th>Purok</th>
                   {!isFlat && <th>Meter Number</th>}
                   <th>Address</th>
                   <th>Contact</th>
@@ -258,6 +259,7 @@ function Consumers() {
                   <tr key={c.id}>
                     <td>#{c.id}</td>
                     <td>{c.name}</td>
+                    <td>{c.purok || '-'}</td>
                     {!isFlat && <td>{c.meter_number}</td>}
                     <td>{c.address}</td>
                     <td>{c.contact_number}</td>
@@ -276,7 +278,7 @@ function Consumers() {
                               className="btn btn-secondary" 
                               style={{ padding: '0.4rem 0.6rem', fontSize: '0.75rem', marginRight: '0.5rem' }}
                               onClick={() => {
-                                setEditForm({ id: c.id, name: c.name, meter_number: c.meter_number || '', address: c.address || '', contact_number: c.contact_number || '' });
+                                setEditForm({ id: c.id, name: c.name, meter_number: c.meter_number || '', address: c.address || '', contact_number: c.contact_number || '', purok: c.purok || '' });
                                 setShowEditModal(true);
                               }}
                             >
@@ -319,6 +321,10 @@ function Consumers() {
                   <input type="text" className="form-input" required value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} />
                 </div>
                 <div className="form-group">
+                  <label className="form-label">Purok</label>
+                  <input type="text" className="form-input" placeholder="e.g. Purok 1" value={editForm.purok} onChange={e => setEditForm({...editForm, purok: e.target.value})} />
+                </div>
+                <div className="form-group">
                   <label className="form-label">Meter Number</label>
                   <input type="text" className="form-input" required={!isFlat} value={editForm.meter_number} onChange={e => setEditForm({...editForm, meter_number: e.target.value})} />
                   {isFlat && <small style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>Optional for flat rate billing</small>}
@@ -355,6 +361,10 @@ function Consumers() {
                 <div className="form-group">
                   <label className="form-label">Full Name</label>
                   <input type="text" className="form-input" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Purok</label>
+                  <input type="text" className="form-input" placeholder="e.g. Purok 1" value={formData.purok} onChange={e => setFormData({...formData, purok: e.target.value})} />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Meter Number</label>

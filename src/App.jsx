@@ -48,6 +48,7 @@ function AppContent() {
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('username');
+    localStorage.removeItem('assigned_purok');
     window.dispatchEvent(new Event('auth-change'));
   };
 
@@ -93,6 +94,11 @@ function AppContent() {
               </svg>
             </div>
             <span className="logo-text">{systemName}</span>
+            {userRole === 'STAFF' && localStorage.getItem('assigned_purok') && (
+              <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', padding: '0.25rem 0.75rem', backgroundColor: 'rgba(74, 222, 128, 0.15)', color: 'var(--secondary)', borderRadius: '1rem', textAlign: 'center' }}>
+                {localStorage.getItem('assigned_purok')}
+              </div>
+            )}
           </div>
 
           <nav className="nav-links">

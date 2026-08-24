@@ -25,7 +25,7 @@ function Settings() {
   
   // User Management
   const [users, setUsers] = useState([]);
-  const [newUser, setNewUser] = useState({ username: '', password: '', role: 'ADMIN' });
+  const [newUser, setNewUser] = useState({ username: '', password: '', role: 'ADMIN', assigned_purok: '' });
   const [addingUser, setAddingUser] = useState(false);
 
   const addToast = (message, type = 'success') => {
@@ -33,6 +33,8 @@ function Settings() {
     setToasts(prev => [...prev, { id, message, type }]);
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3000);
   };
+
+  const [puroks, setPuroks] = useState([]);
 
   useEffect(() => {
     fetchWithAuth('/api/settings')
@@ -45,6 +47,13 @@ function Settings() {
       
     if (userRole === 'SUPER_ADMIN') {
       fetchUsers();
+      fetchWithAuth('/api/consumers')
+        .then(res => res.json())
+        .then(data => {
+          const uniquePuroks = [...new Set(data.map(c => c.purok).filter(Boolean))].sort();
+          setPuroks(uniquePuroks);
+        })
+        .catch(() => {});
     }
   }, [userRole]);
 
@@ -176,7 +185,7 @@ function Settings() {
       });
       if (res.ok) {
         addToast('User created successfully!');
-        setNewUser({ username: '', password: '', role: 'ADMIN' });
+        setNewUser({ username: '', password: '', role: 'ADMIN', assigned_purok: '' });
         fetchUsers();
       } else {
         const data = await res.json();
@@ -340,6 +349,7 @@ function Settings() {
                       <tr>
                         <th>Username</th>
                         <th>Role</th>
+                        <th>Assigned Purok</th>
                         <th>Action</th>
                       </tr>
                     </thead>
@@ -352,6 +362,7 @@ function Settings() {
                               {u.role.replace('_', ' ')}
                             </span>
                           </td>
+                          <td>{u.assigned_purok || '-'}</td>
                           <td>
                             {u.username !== localStorage.getItem('username') && (
                               <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem', borderColor: 'var(--danger)', color: 'var(--danger)' }} onClick={() => handleDeleteUser(u.id)}>
@@ -385,6 +396,21 @@ function Settings() {
                       <option value="SUPER_ADMIN">SUPER ADMIN</option>
                     </select>
                   </div>
+                  {newUser.role === 'STAFF' && (
+                    <div className="form-group">
+                      <label className="form-label">Assigned Purok</label>
+                      <input 
+                        type="text" 
+                        className="form-input" 
+                        list="purok-options"
+                        value={newUser.assigned_purok} 
+                        onChange={e => setNewUser({...newUser, assigned_purok: e.target.value})} 
+                      />
+                      <datalist id="purok-options">
+                        {puroks.map(p => <option key={p} value={p}>{p}</option>)}
+                      </datalist>
+                    </div>
+                  )}
                   <button type="submit" className="btn btn-primary" disabled={addingUser} style={{ width: '100%' }}>
                     {addingUser ? 'Adding...' : 'Add User'}
                   </button>

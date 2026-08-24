@@ -12,6 +12,11 @@ function Reports() {
   const [summaryData, setSummaryData] = useState(null);
   const [ledgerData, setLedgerData] = useState(null);
   const [agingData, setAgingData] = useState(null);
+  const [purokSummaryData, setPurokSummaryData] = useState([]);
+  
+  const userRole = localStorage.getItem('role') || 'ADMIN';
+  const [purokFilter, setPurokFilter] = useState('');
+  const [puroks, setPuroks] = useState([]);
 
   const [month, setMonth] = useState(() => {
     const d = new Date();
@@ -23,7 +28,11 @@ function Reports() {
   useEffect(() => {
     fetchWithAuth('/api/consumers')
       .then(res => res.json())
-      .then(data => setConsumers(data))
+      .then(data => {
+        setConsumers(data);
+        const uniquePuroks = [...new Set(data.map(c => c.purok).filter(Boolean))].sort();
+        setPuroks(uniquePuroks);
+      })
       .catch(err => console.error(err));
   }, []);
 
@@ -31,13 +40,26 @@ function Reports() {
     if (activeTab === 'summary') fetchSummary();
     else if (activeTab === 'ledger' && consumerId) fetchLedger();
     else if (activeTab === 'aging') fetchAging();
-  }, [activeTab, month, consumerId]);
+    else if (activeTab === 'purok') fetchPurokSummary();
+  }, [activeTab, month, consumerId, purokFilter]);
 
   const fetchSummary = async () => {
     setLoading(true);
     try {
-      const res = await fetchWithAuth(`/api/reports/collection-summary?month=${month}`);
+      const res = await fetchWithAuth(`/api/reports/collection-summary?month=${month}${purokFilter ? `&purok=${purokFilter}` : ''}`);
       if (res.ok) setSummaryData(await res.json());
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchPurokSummary = async () => {
+    setLoading(true);
+    try {
+      const res = await fetchWithAuth(`/api/reports/purok-summary?month=${month}`);
+      if (res.ok) setPurokSummaryData(await res.json());
     } catch (err) {
       console.error(err);
     } finally {
@@ -84,6 +106,7 @@ function Reports() {
       <div className="tabs print-hide" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <button className={`tab ${activeTab === 'summary' ? 'active' : ''}`} onClick={() => setActiveTab('summary')}>Collection Summary</button>
+          {userRole !== 'STAFF' && <button className={`tab ${activeTab === 'purok' ? 'active' : ''}`} onClick={() => setActiveTab('purok')}>Purok Summary</button>}
           <button className={`tab ${activeTab === 'ledger' ? 'active' : ''}`} onClick={() => setActiveTab('ledger')}>Consumer Ledger</button>
           <button className={`tab ${activeTab === 'aging' ? 'active' : ''}`} onClick={() => setActiveTab('aging')}>Aging Report</button>
         </div>
@@ -101,6 +124,12 @@ function Reports() {
               <h2 className="card-title" style={{ margin: 0 }}>Collection Summary</h2>
               <div className="print-hide">
                 <input type="month" className="form-input" value={month} onChange={(e) => setMonth(e.target.value)} />
+                {userRole !== 'STAFF' && (
+                  <select className="form-input" style={{ marginLeft: '0.5rem' }} value={purokFilter} onChange={(e) => setPurokFilter(e.target.value)}>
+                    <option value="">All Puroks</option>
+                    {puroks.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                )}
               </div>
             </div>
 
@@ -151,6 +180,47 @@ function Reports() {
                 ) : <div className="empty-state">No records for this month.</div>}
               </>
             ) : <div className="empty-state">Select a month to view summary.</div>}
+          </div>
+        )}
+
+        {/* Purok Summary Tab */}
+        {activeTab === 'purok' && (
+          <div>
+            <div className="report-header">
+              <h2 className="card-title" style={{ margin: 0 }}>Purok Summary</h2>
+              <div className="print-hide">
+                <input type="month" className="form-input" value={month} onChange={(e) => setMonth(e.target.value)} />
+              </div>
+            </div>
+
+            {loading ? <div className="loading-spinner"></div> : purokSummaryData && purokSummaryData.length > 0 ? (
+              <div className="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Purok</th>
+                      <th>Consumers</th>
+                      <th>Total Billed</th>
+                      <th>Total Collected</th>
+                      <th>Total Pending</th>
+                      <th>Collection Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {purokSummaryData.map((d, i) => (
+                      <tr key={i}>
+                        <td>{d.purok}</td>
+                        <td>{d.consumers}</td>
+                        <td>₱{Number(d.total_billed || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                        <td>₱{Number(d.total_collected || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                        <td>₱{Number(d.total_pending || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                        <td>{d.collection_rate}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : <div className="empty-state">No records for this month.</div>}
           </div>
         )}
 

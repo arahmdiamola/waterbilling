@@ -34,6 +34,7 @@ function Login({ onLogin }) {
         localStorage.setItem('token', data.token);
         localStorage.setItem('username', data.username);
         localStorage.setItem('role', data.role);
+        localStorage.setItem('assigned_purok', data.assigned_purok || '');
         window.dispatchEvent(new Event('auth-change'));
         if (onLogin) onLogin();
       } else {

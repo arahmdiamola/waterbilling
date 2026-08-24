@@ -51,6 +51,16 @@ app.get('/api/public/settings', async (req, res) => {
   }
 });
 
+// --- Distinct Puroks List (Public/Auth) ---
+app.get('/api/puroks', async (req, res) => {
+  try {
+    const puroks = (await db.execute("SELECT DISTINCT purok FROM consumers WHERE purok IS NOT NULL AND purok != '' ORDER BY purok")).rows;
+    res.json(puroks.map(p => p.purok));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // --- Middleware ---
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -109,14 +119,15 @@ app.get('/api/users', requireSuperAdmin, async (req, res) => {
 });
 
 app.post('/api/users', requireSuperAdmin, async (req, res) => {
-  const { username, password, role } = req.body;
+  const { username, password, role, assigned_purok } = req.body;
   try {
     if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
     const userRole = (role === 'SUPER_ADMIN' || role === 'STAFF') ? role : 'ADMIN';
+    const assignedPurok = userRole === 'STAFF' ? (assigned_purok || null) : null;
     const hash = bcrypt.hashSync(password, 10);
-    const info = await db.execute({ sql: 'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)', args: [username, hash, userRole] });
+    const info = await db.execute({ sql: 'INSERT INTO users (username, password_hash, role, assigned_purok) VALUES (?, ?, ?, ?)', args: [username, hash, userRole, assignedPurok] });
     logAudit(req.user.username, 'USERS', `Created new user: ${username} (${userRole})`);
-    res.status(201).json({ id: info.lastInsertRowid.toString(), username, role: userRole });
+    res.status(201).json({ id: info.lastInsertRowid.toString(), username, role: userRole, assigned_purok: assignedPurok });
   } catch (error) {
     if (error.message.includes('UNIQUE constraint failed')) {
       return res.status(400).json({ error: 'Username already exists' });
@@ -143,7 +154,12 @@ app.delete('/api/users/:id', requireSuperAdmin, async (req, res) => {
 
 app.get('/api/consumers', async (req, res) => {
   try {
-    const consumers = (await db.execute('SELECT * FROM consumers ORDER BY name')).rows;
+    let consumers;
+    if (req.user.role === 'STAFF' && req.user.assigned_purok) {
+      consumers = (await db.execute({ sql: 'SELECT * FROM consumers WHERE purok = ? ORDER BY name', args: [req.user.assigned_purok] })).rows;
+    } else {
+      consumers = (await db.execute('SELECT * FROM consumers ORDER BY name')).rows;
+    }
     res.json(consumers);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -151,24 +167,24 @@ app.get('/api/consumers', async (req, res) => {
 });
 
 app.post('/api/consumers', requireAdmin, async (req, res) => {
-  const { name, meter_number, address, contact_number } = req.body;
+  const { name, meter_number, address, contact_number, purok } = req.body;
   try {
-    const info = await db.execute({ sql: 'INSERT INTO consumers (name, meter_number, address, contact_number) VALUES (?, ?, ?, ?)', args: [name, meter_number, address, contact_number] });
+    const consumerPurok = (req.user.role === 'STAFF' && req.user.assigned_purok) ? req.user.assigned_purok : (purok || null);
+    const info = await db.execute({ sql: 'INSERT INTO consumers (name, meter_number, address, contact_number, purok) VALUES (?, ?, ?, ?, ?)', args: [name, meter_number, address, contact_number, consumerPurok] });
     logAudit(req.user.username, 'CONSUMERS', `Added consumer: ${name} (Meter: ${meter_number})`);
-    res.status(201).json({ id: info.lastInsertRowid.toString(), name, meter_number, address, contact_number });
+    res.status(201).json({ id: info.lastInsertRowid.toString(), name, meter_number, address, contact_number, purok: consumerPurok });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-
 app.put('/api/consumers/:id', requireSuperAdmin, async (req, res) => {
   const { id } = req.params;
-  const { name, meter_number, address, contact_number } = req.body;
+  const { name, meter_number, address, contact_number, purok } = req.body;
   try {
     await db.execute({ 
-      sql: 'UPDATE consumers SET name = ?, meter_number = ?, address = ?, contact_number = ? WHERE id = ?', 
-      args: [name, meter_number, address, contact_number, id] 
+      sql: 'UPDATE consumers SET name = ?, meter_number = ?, address = ?, contact_number = ?, purok = ? WHERE id = ?', 
+      args: [name, meter_number, address, contact_number, purok || null, id] 
     });
     logAudit(req.user.username, 'CONSUMERS', `Updated consumer ID ${id}: ${name}`);
     res.json({ message: 'Consumer updated successfully' });
@@ -194,12 +210,23 @@ app.delete('/api/consumers/:id', requireSuperAdmin, async (req, res) => {
 
 app.get('/api/billings', async (req, res) => {
   try {
-    const billings = (await db.execute(`
-      SELECT b.*, c.name as consumer_name, c.address as consumer_address, c.meter_number as consumer_meter
-      FROM billings b 
-      JOIN consumers c ON b.consumer_id = c.id 
-      ORDER BY b.billing_month DESC, c.name ASC
-    `)).rows;
+    let billings;
+    if (req.user.role === 'STAFF' && req.user.assigned_purok) {
+      billings = (await db.execute({ sql: `
+        SELECT b.*, c.name as consumer_name, c.address as consumer_address, c.meter_number as consumer_meter
+        FROM billings b 
+        JOIN consumers c ON b.consumer_id = c.id 
+        WHERE c.purok = ?
+        ORDER BY b.billing_month DESC, c.name ASC
+      `, args: [req.user.assigned_purok] })).rows;
+    } else {
+      billings = (await db.execute(`
+        SELECT b.*, c.name as consumer_name, c.address as consumer_address, c.meter_number as consumer_meter
+        FROM billings b 
+        JOIN consumers c ON b.consumer_id = c.id 
+        ORDER BY b.billing_month DESC, c.name ASC
+      `)).rows;
+    }
     res.json(billings);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -209,6 +236,13 @@ app.get('/api/billings', async (req, res) => {
 app.post('/api/billings', async (req, res) => {
   const { consumer_id, billing_month, previous_reading, current_reading, due_date } = req.body;
   try {
+    if (req.user.role === 'STAFF' && req.user.assigned_purok) {
+      const consumer = (await db.execute({ sql: 'SELECT purok FROM consumers WHERE id = ?', args: [consumer_id] })).rows[0];
+      if (!consumer || consumer.purok !== req.user.assigned_purok) {
+        return res.status(403).json({ error: 'Access denied. Consumer is not in your assigned purok.' });
+      }
+    }
+
     const tenant = (await db.execute('SELECT * FROM tenants LIMIT 1')).rows[0];
     let amount_due = 0;
     let consumption = null;
@@ -302,6 +336,13 @@ app.post('/api/payments', async (req, res) => {
     
     if (parsedAmount <= 0) {
       return res.status(400).json({ error: 'Amount paid must be greater than 0' });
+    }
+
+    if (req.user.role === 'STAFF' && req.user.assigned_purok) {
+      const billCheck = (await db.execute({ sql: 'SELECT c.purok FROM billings b JOIN consumers c ON b.consumer_id = c.id WHERE b.id = ?', args: [billing_id] })).rows[0];
+      if (!billCheck || billCheck.purok !== req.user.assigned_purok) {
+        return res.status(403).json({ error: 'Access denied. Billing belongs to a consumer outside your assigned purok.' });
+      }
     }
 
     const tx = await db.transaction('write');
@@ -401,7 +442,8 @@ app.post('/api/consumers/batch', requireAdmin, async (req, res) => {
     let errors = [];
     for (const c of consumers) {
       try {
-        await tx.execute({ sql: 'INSERT INTO consumers (name, meter_number, address, contact_number) VALUES (?, ?, ?, ?)', args: [c.name, c.meter_number, c.address, c.contact_number] });
+        const consumerPurok = (req.user.role === 'STAFF' && req.user.assigned_purok) ? req.user.assigned_purok : (c.purok || null);
+        await tx.execute({ sql: 'INSERT INTO consumers (name, meter_number, address, contact_number, purok) VALUES (?, ?, ?, ?, ?)', args: [c.name, c.meter_number, c.address, c.contact_number, consumerPurok] });
         inserted++;
       } catch (err) {
         errors.push({ consumer: c, error: err.message });
@@ -532,21 +574,31 @@ app.post('/api/billings/batch', async (req, res) => {
 });
 
 app.get('/api/reports/collection-summary', async (req, res) => {
-  const { month } = req.query; // YYYY-MM
+  const { month, purok } = req.query; // YYYY-MM
+  const staffPurok = (req.user.role === 'STAFF' && req.user.assigned_purok) ? req.user.assigned_purok : null;
+  const effectivePurok = staffPurok || purok || null;
+
   try {
     let query = `
-      SELECT b.*, c.name as consumer_name, 
+      SELECT b.*, c.name as consumer_name, c.purok,
              (SELECT SUM(amount_paid) FROM payments WHERE billing_id = b.id) as amount_paid
       FROM billings b
       JOIN consumers c ON b.consumer_id = c.id
+      WHERE 1=1
     `;
     let params = [];
+    
     if (month) {
-      query += ` WHERE b.billing_month = ?`;
+      query += ` AND b.billing_month = ?`;
       params.push(month);
     }
     
-    const billsRaw = (await db.execute({ sql: query, args: [...params] })).rows;
+    if (effectivePurok) {
+      query += ` AND c.purok = ?`;
+      params.push(effectivePurok);
+    }
+    
+    const billsRaw = (await db.execute({ sql: query, args: params })).rows;
     let total_billed = 0;
     let total_collected = 0;
     
@@ -585,8 +637,12 @@ app.get('/api/reports/consumer-ledger', async (req, res) => {
   if (!consumer_id) return res.status(400).json({ error: 'consumer_id required' });
 
   try {
-    const consumer = (await db.execute({ sql: 'SELECT name, meter_number, address FROM consumers WHERE id = ?', args: [consumer_id] })).rows[0];
+    const consumer = (await db.execute({ sql: 'SELECT name, meter_number, address, purok FROM consumers WHERE id = ?', args: [consumer_id] })).rows[0];
     if (!consumer) return res.status(404).json({ error: 'Consumer not found' });
+    
+    if (req.user.role === 'STAFF' && req.user.assigned_purok && consumer.purok !== req.user.assigned_purok) {
+      return res.status(403).json({ error: 'Access denied. Consumer is not in your assigned purok.' });
+    }
 
     const ledgerRaw = (await db.execute({ sql: `
       SELECT b.billing_month, b.consumption, b.amount_due, b.status,
@@ -616,7 +672,8 @@ app.get('/api/reports/consumer-ledger', async (req, res) => {
 
 app.get('/api/reports/aging', async (req, res) => {
   try {
-    const agingRaw = (await db.execute(`
+    const staffPurok = (req.user.role === 'STAFF' && req.user.assigned_purok) ? req.user.assigned_purok : null;
+    let query = `
       SELECT c.id as consumer_id, c.name as consumer_name,
              SUM(b.amount_due - IFNULL((SELECT SUM(amount_paid) FROM payments WHERE billing_id = b.id), 0)) as total_unpaid,
              MIN(b.billing_month) as oldest_unpaid_month,
@@ -624,10 +681,19 @@ app.get('/api/reports/aging', async (req, res) => {
       FROM billings b
       JOIN consumers c ON b.consumer_id = c.id
       WHERE b.status IN ('PENDING', 'PARTIAL')
+    `;
+    let args = [];
+    if (staffPurok) {
+      query += ` AND c.purok = ?`;
+      args.push(staffPurok);
+    }
+    query += `
       GROUP BY c.id
       HAVING total_unpaid > 0
       ORDER BY total_unpaid DESC
-    `)).rows;
+    `;
+    
+    const agingRaw = (await db.execute({ sql: query, args })).rows;
 
     res.json({ aging: agingRaw });
   } catch (error) {
@@ -637,24 +703,48 @@ app.get('/api/reports/aging', async (req, res) => {
 
 app.get('/api/dashboard', async (req, res) => {
   try {
-    const total_consumers = (await db.execute('SELECT COUNT(*) as count FROM consumers')).rows[0].count;
-    
-    const billedStmt = (await db.execute('SELECT SUM(amount_due) as total FROM billings')).rows[0];
-    const total_billed = billedStmt.total || 0;
-    
-    const collectedStmt = (await db.execute('SELECT SUM(amount_paid) as total FROM payments')).rows[0];
-    const total_collected = collectedStmt.total || 0;
-    
+    const isStaff = req.user.role === 'STAFF' && req.user.assigned_purok;
+    const purokFilter = isStaff ? req.user.assigned_purok : null;
+
+    let total_consumers, total_billed, total_collected, recent_billings;
+
+    if (purokFilter) {
+      total_consumers = (await db.execute({ sql: 'SELECT COUNT(*) as count FROM consumers WHERE purok = ?', args: [purokFilter] })).rows[0].count;
+      
+      const billedStmt = (await db.execute({ sql: 'SELECT SUM(b.amount_due) as total FROM billings b JOIN consumers c ON b.consumer_id = c.id WHERE c.purok = ?', args: [purokFilter] })).rows[0];
+      total_billed = billedStmt.total || 0;
+      
+      const collectedStmt = (await db.execute({ sql: 'SELECT SUM(p.amount_paid) as total FROM payments p JOIN billings b ON p.billing_id = b.id JOIN consumers c ON b.consumer_id = c.id WHERE c.purok = ?', args: [purokFilter] })).rows[0];
+      total_collected = collectedStmt.total || 0;
+      
+      recent_billings = (await db.execute({ sql: `
+        SELECT b.*, c.name as consumer_name
+        FROM billings b
+        JOIN consumers c ON b.consumer_id = c.id
+        WHERE c.purok = ?
+        ORDER BY b.created_at DESC
+        LIMIT 10
+      `, args: [purokFilter] })).rows;
+    } else {
+      total_consumers = (await db.execute('SELECT COUNT(*) as count FROM consumers')).rows[0].count;
+      
+      const billedStmt = (await db.execute('SELECT SUM(amount_due) as total FROM billings')).rows[0];
+      total_billed = billedStmt.total || 0;
+      
+      const collectedStmt = (await db.execute('SELECT SUM(amount_paid) as total FROM payments')).rows[0];
+      total_collected = collectedStmt.total || 0;
+      
+      recent_billings = (await db.execute(`
+        SELECT b.*, c.name as consumer_name
+        FROM billings b
+        JOIN consumers c ON b.consumer_id = c.id
+        ORDER BY b.created_at DESC
+        LIMIT 10
+      `)).rows;
+    }
+
     const total_pending = total_billed - total_collected;
     const collection_rate = total_billed > 0 ? ((total_collected / total_billed) * 100).toFixed(2) + '%' : '0%';
-    
-    const recent_billings = (await db.execute(`
-      SELECT b.*, c.name as consumer_name
-      FROM billings b
-      JOIN consumers c ON b.consumer_id = c.id
-      ORDER BY b.created_at DESC
-      LIMIT 10
-    `)).rows;
 
     res.json({
       total_consumers,
@@ -877,6 +967,42 @@ app.post('/api/database/reset', requireSuperAdmin, async (req, res) => {
   }
 });
 
+// --- Purok Summary Endpoint ---
+app.get('/api/reports/purok-summary', async (req, res) => {
+  const { month } = req.query;
+  try {
+    let sql = `
+      SELECT 
+        c.purok,
+        COUNT(DISTINCT c.id) as total_consumers,
+        COALESCE(SUM(b.amount_due), 0) as total_billed,
+        COALESCE(SUM(CASE WHEN b.status = 'PAID' THEN b.amount_due ELSE 0 END), 0) as total_collected,
+        COALESCE(SUM(CASE WHEN b.status != 'PAID' THEN b.amount_due ELSE 0 END), 0) as total_pending
+      FROM consumers c
+      LEFT JOIN billings b ON b.consumer_id = c.id
+    `;
+    const args = [];
+    if (month) {
+      sql += ` AND b.billing_month = ?`;
+      args.push(month);
+    }
+    sql += ` WHERE c.purok IS NOT NULL AND c.purok != '' GROUP BY c.purok ORDER BY c.purok`;
+    
+    const rows = (await db.execute({ sql, args })).rows;
+    const summary = rows.map(r => ({
+      purok: r.purok,
+      total_consumers: r.total_consumers,
+      total_billed: r.total_billed || 0,
+      total_collected: r.total_collected || 0,
+      total_pending: r.total_pending || 0,
+      collection_rate: r.total_billed > 0 ? ((r.total_collected || 0) / r.total_billed * 100).toFixed(1) + '%' : '0%'
+    }));
+    res.json(summary);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // --- Audit Logs Endpoint ---
 app.get('/api/audit-logs', requireSuperAdmin, async (req, res) => {
   try {
@@ -893,7 +1019,13 @@ app.get('/api/readings/offline-sheet', async (req, res) => {
   if (!month) return res.status(400).json({ error: 'month is required (YYYY-MM)' });
 
   try {
-    const consumers = (await db.execute('SELECT id, name, meter_number, address FROM consumers ORDER BY name')).rows;
+    let consumers;
+    const staffPurok = (req.user.role === 'STAFF' && req.user.assigned_purok) ? req.user.assigned_purok : null;
+    if (staffPurok) {
+      consumers = (await db.execute({ sql: 'SELECT id, name, meter_number, address FROM consumers WHERE purok = ? ORDER BY name', args: [staffPurok] })).rows;
+    } else {
+      consumers = (await db.execute('SELECT id, name, meter_number, address FROM consumers ORDER BY name')).rows;
+    }
     
     const consumersWithReadingsUnfiltered = await Promise.all(consumers.map(async c => {
       const lastBill = (await db.execute({ sql: `

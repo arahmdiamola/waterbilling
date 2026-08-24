@@ -26,7 +26,8 @@ const initDb = async () => {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
-      role TEXT DEFAULT 'ADMIN', -- ADMIN or SUPER_ADMIN
+      role TEXT DEFAULT 'ADMIN', -- ADMIN, SUPER_ADMIN, or STAFF
+      assigned_purok TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -36,6 +37,7 @@ const initDb = async () => {
       meter_number TEXT UNIQUE,
       address TEXT,
       contact_number TEXT,
+      purok TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -106,6 +108,20 @@ const initDb = async () => {
   } catch (e) {
     await db.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'ADMIN'");
     await db.execute("UPDATE users SET role = 'SUPER_ADMIN' WHERE username = 'admin'");
+  }
+
+  // Migrate: add purok column to consumers
+  try {
+    await db.execute("SELECT purok FROM consumers LIMIT 1");
+  } catch (e) {
+    await db.execute("ALTER TABLE consumers ADD COLUMN purok TEXT");
+  }
+
+  // Migrate: add assigned_purok column to users
+  try {
+    await db.execute("SELECT assigned_purok FROM users LIMIT 1");
+  } catch (e) {
+    await db.execute("ALTER TABLE users ADD COLUMN assigned_purok TEXT");
   }
 };
 
