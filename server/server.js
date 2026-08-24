@@ -790,7 +790,11 @@ app.get('/api/database/backup', requireSuperAdmin, async (req, res) => {
     const backupFileName = `water_billing_backup_${new Date().toISOString().split('T')[0]}.db`;
     const tempBackupPath = path.resolve(__dirname, `temp_${backupFileName}`);
     
-    await db.backup(tempBackupPath);
+    const dbPath = path.resolve(__dirname, 'water_billing.db');
+    if (process.env.TURSO_DATABASE_URL && process.env.TURSO_DATABASE_URL.startsWith('libsql://')) {
+      return res.status(400).json({ error: 'Direct file backup is not supported for remote Turso databases. Please use the Turso dashboard.' });
+    }
+    fs.copyFileSync(dbPath, tempBackupPath);
     
     logAudit(req.user.username, 'DATABASE', 'Downloaded a database backup');
 
@@ -822,6 +826,10 @@ app.post('/api/database/restore', requireSuperAdmin, upload.single('database'), 
 
     const dbPath = path.resolve(__dirname, 'water_billing.db');
     
+    if (process.env.TURSO_DATABASE_URL && process.env.TURSO_DATABASE_URL.startsWith('libsql://')) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ error: 'Direct file restore is not supported for remote Turso databases.' });
+    }
     // Close existing connection
     db.close();
 
