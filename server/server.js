@@ -265,6 +265,7 @@ app.put('/api/billings/:id/adjust', async (req, res) => {
 
 app.post('/api/payments', async (req, res) => {
   let { billing_id, amount_paid, payment_method, receipt_number } = req.body;
+  payment_method = payment_method || 'CASH';
   try {
     const parsedAmount = parseFloat(amount_paid);
     
@@ -315,7 +316,7 @@ app.post('/api/payments', async (req, res) => {
     await db.execute({ sql: 'UPDATE billings SET status = ? WHERE id = ?', args: [newStatus, billing_id] });
 
     await db.execute('COMMIT');
-    logAudit(req.user.username, 'PAYMENT', `Recorded payment of â‚±${parsedAmount} for Bill ID ${billing_id} (Receipt: ${receipt_number})`);
+    logAudit(req.user.username, 'PAYMENT', `Recorded payment of PHP ${parsedAmount} for Bill ID ${billing_id} (Receipt: ${receipt_number})`);
 
     const remainingBalance = Math.max(0, billing.amount_due - totalPaidAfter);
 

@@ -142,7 +142,8 @@ function Billing() {
         method: 'POST',
         body: JSON.stringify({
           billing_id: selectedBill.id,
-          amount_paid: payForm.amount_paid
+          amount_paid: payForm.amount_paid,
+          payment_method: 'CASH'
         })
       });
       if (response.ok) {
