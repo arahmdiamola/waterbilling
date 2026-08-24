@@ -161,6 +161,37 @@ app.post('/api/consumers', requireAdmin, async (req, res) => {
   }
 });
 
+
+app.put('/api/consumers/:id', requireSuperAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { name, meter_number, address, contact_number } = req.body;
+  try {
+    await db.execute({ 
+      sql: 'UPDATE consumers SET name = ?, meter_number = ?, address = ?, contact_number = ? WHERE id = ?', 
+      args: [name, meter_number, address, contact_number, id] 
+    });
+    logAudit(req.user.username, 'CONSUMERS', `Updated consumer ID ${id}: ${name}`);
+    res.json({ message: 'Consumer updated successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/consumers/:id', requireSuperAdmin, async (req, res) => {
+  const { id } = req.params;
+  try {
+    const billings = await db.execute({ sql: 'SELECT id FROM billings WHERE consumer_id = ? LIMIT 1', args: [id] });
+    if (billings.rows.length > 0) {
+      return res.status(400).json({ error: 'Cannot delete consumer with existing billing records' });
+    }
+    await db.execute({ sql: 'DELETE FROM consumers WHERE id = ?', args: [id] });
+    logAudit(req.user.username, 'CONSUMERS', `Deleted consumer ID: ${id}`);
+    res.json({ message: 'Consumer deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/billings', async (req, res) => {
   try {
     const billings = (await db.execute(`
@@ -820,13 +851,13 @@ app.post('/api/database/reset', requireSuperAdmin, async (req, res) => {
   try {
     const tx = await db.transaction('write');
     
-    db.exec('DELETE FROM payments');
-    db.exec('DELETE FROM billings');
-    db.exec("DELETE FROM sqlite_sequence WHERE name IN ('payments', 'billings')"); // Reset auto-increment
+    await tx.execute('DELETE FROM payments');
+    await tx.execute('DELETE FROM billings');
+    await tx.execute("DELETE FROM sqlite_sequence WHERE name IN ('payments', 'billings')"); // Reset auto-increment
     
     if (option === 'FULL') {
-      db.exec("DELETE FROM consumers");
-      db.exec("DELETE FROM sqlite_sequence WHERE name = 'consumers'");
+      await tx.execute("DELETE FROM consumers");
+      await tx.execute("DELETE FROM sqlite_sequence WHERE name = 'consumers'");
     }
     
     await tx.commit();
