@@ -1,13 +1,16 @@
-const Database = require('better-sqlite3');
+const { createClient } = require('@libsql/client');
 const path = require('path');
 const bcrypt = require('bcryptjs');
+require('dotenv').config();
 
-const dbPath = path.resolve(__dirname, 'water_billing.db');
-const db = new Database(dbPath, { verbose: console.log });
+const db = createClient({
+  url: process.env.TURSO_DATABASE_URL || 'file:water_billing.db',
+  authToken: process.env.TURSO_AUTH_TOKEN
+});
 
 // Create Tables
-const initDb = () => {
-  db.exec(`
+const initDb = async () => {
+  await db.executeMultiple(`
     CREATE TABLE IF NOT EXISTS tenants (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -70,39 +73,42 @@ const initDb = () => {
   `);
 
   // Insert default tenant if not exists
-  const tenant = db.prepare('SELECT * FROM tenants LIMIT 1').get();
-  if (!tenant) {
-    db.prepare(`
-      INSERT INTO tenants (name, billing_type, flat_rate, minimum_cubic_meters, minimum_charge, rate_per_cubic_meter, currency)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run('Default Water System', 'METERED', 0, 10, 150, 25.00, 'PHP');
+  const tenantRes = await db.execute('SELECT * FROM tenants LIMIT 1');
+  if (tenantRes.rows.length === 0) {
+    await db.execute({
+      sql: 'INSERT INTO tenants (name, billing_type, flat_rate, minimum_cubic_meters, minimum_charge, rate_per_cubic_meter, currency) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      args: ['Default Water System', 'METERED', 0, 10, 150, 25.00, 'PHP']
+    });
   }
 
   // Insert default user if not exists
-  const user = db.prepare('SELECT * FROM users LIMIT 1').get();
-  if (!user) {
+  const userRes = await db.execute('SELECT * FROM users LIMIT 1');
+  if (userRes.rows.length === 0) {
     const salt = bcrypt.genSaltSync(10);
     const hash = bcrypt.hashSync('password123', salt);
-    db.prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)').run('admin', hash, 'SUPER_ADMIN');
+    await db.execute({
+      sql: 'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)',
+      args: ['admin', hash, 'SUPER_ADMIN']
+    });
+  }
+
+  // Migrate: add new columns if they don't exist (for existing databases)
+  try {
+    await db.execute("SELECT minimum_cubic_meters FROM tenants LIMIT 1");
+  } catch (e) {
+    await db.execute("ALTER TABLE tenants ADD COLUMN minimum_cubic_meters REAL DEFAULT 10");
+    await db.execute("ALTER TABLE tenants ADD COLUMN minimum_charge REAL DEFAULT 150");
+    await db.execute("UPDATE tenants SET minimum_cubic_meters = 10, minimum_charge = 150");
+  }
+
+  try {
+    await db.execute("SELECT role FROM users LIMIT 1");
+  } catch (e) {
+    await db.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'ADMIN'");
+    await db.execute("UPDATE users SET role = 'SUPER_ADMIN' WHERE username = 'admin'");
   }
 };
 
-initDb();
-
-// Migrate: add new columns if they don't exist (for existing databases)
-try {
-  db.prepare("SELECT minimum_cubic_meters FROM tenants LIMIT 1").get();
-} catch (e) {
-  db.exec("ALTER TABLE tenants ADD COLUMN minimum_cubic_meters REAL DEFAULT 10");
-  db.exec("ALTER TABLE tenants ADD COLUMN minimum_charge REAL DEFAULT 150");
-  db.prepare("UPDATE tenants SET minimum_cubic_meters = 10, minimum_charge = 150").run();
-}
-
-try {
-  db.prepare("SELECT role FROM users LIMIT 1").get();
-} catch (e) {
-  db.exec("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'ADMIN'");
-  db.prepare("UPDATE users SET role = 'SUPER_ADMIN' WHERE username = 'admin'").run();
-}
+initDb().catch(console.error);
 
 module.exports = db;

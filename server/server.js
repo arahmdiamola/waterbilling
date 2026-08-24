@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 const db = require('./database');
@@ -20,15 +20,15 @@ const JWT_SECRET = process.env.JWT_SECRET || 'fallback-super-secret-key-change-i
 const PORT = process.env.PORT || 5000;
 
 // --- Health Check for UptimeRobot ---
-app.get('/api/ping', (req, res) => {
+app.get('/api/ping', async (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 // --- Auth Endpoints ---
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
   const { username, password } = req.body;
   try {
-    const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+    const user = (await db.execute({ sql: 'SELECT * FROM users WHERE username = ?', args: [username] })).rows[0];
     if (!user) return res.status(401).json({ error: 'Invalid username or password' });
 
     const validPassword = bcrypt.compareSync(password, user.password_hash);
@@ -42,9 +42,9 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 // --- Public Settings ---
-app.get('/api/public/settings', (req, res) => {
+app.get('/api/public/settings', async (req, res) => {
   try {
-    const tenant = db.prepare('SELECT name FROM tenants LIMIT 1').get();
+    const tenant = (await db.execute('SELECT name FROM tenants LIMIT 1')).rows[0];
     res.json({ name: tenant ? tenant.name : 'WaterBill Pro' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -100,16 +100,16 @@ const logAudit = (username, action, details) => {
 };
 
 // --- User Management Endpoints ---
-app.get('/api/users', requireSuperAdmin, (req, res) => {
+app.get('/api/users', requireSuperAdmin, async (req, res) => {
   try {
-    const users = db.prepare('SELECT id, username, role, created_at FROM users ORDER BY created_at DESC').all();
+    const users = (await db.execute('SELECT id, username, role, created_at FROM users ORDER BY created_at DESC')).rows;
     res.json(users);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-app.post('/api/users', requireSuperAdmin, (req, res) => {
+app.post('/api/users', requireSuperAdmin, async (req, res) => {
   const { username, password, role } = req.body;
   try {
     if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
@@ -118,7 +118,7 @@ app.post('/api/users', requireSuperAdmin, (req, res) => {
     const stmt = db.prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)');
     const info = stmt.run(username, hash, userRole);
     logAudit(req.user.username, 'USERS', `Created new user: ${username} (${userRole})`);
-    res.status(201).json({ id: info.lastInsertRowid, username, role: userRole });
+    res.status(201).json({ id: info.lastInsertRowid.toString(), username, role: userRole });
   } catch (error) {
     if (error.message.includes('UNIQUE constraint failed')) {
       return res.status(400).json({ error: 'Username already exists' });
@@ -127,13 +127,13 @@ app.post('/api/users', requireSuperAdmin, (req, res) => {
   }
 });
 
-app.delete('/api/users/:id', requireSuperAdmin, (req, res) => {
+app.delete('/api/users/:id', requireSuperAdmin, async (req, res) => {
   const { id } = req.params;
   if (parseInt(id) === req.user.id) {
     return res.status(400).json({ error: 'Cannot delete your own account' });
   }
   try {
-    db.prepare('DELETE FROM users WHERE id = ?').run(id);
+    await db.execute({ sql: 'DELETE FROM users WHERE id = ?', args: [id] });
     logAudit(req.user.username, 'USERS', `Deleted user ID: ${id}`);
     res.json({ message: 'User deleted successfully' });
   } catch (error) {
@@ -143,45 +143,45 @@ app.delete('/api/users/:id', requireSuperAdmin, (req, res) => {
 
 // --- Existing Endpoints ---
 
-app.get('/api/consumers', (req, res) => {
+app.get('/api/consumers', async (req, res) => {
   try {
-    const consumers = db.prepare('SELECT * FROM consumers ORDER BY name').all();
+    const consumers = (await db.execute('SELECT * FROM consumers ORDER BY name')).rows;
     res.json(consumers);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-app.post('/api/consumers', requireAdmin, (req, res) => {
+app.post('/api/consumers', requireAdmin, async (req, res) => {
   const { name, meter_number, address, contact_number } = req.body;
   try {
     const stmt = db.prepare('INSERT INTO consumers (name, meter_number, address, contact_number) VALUES (?, ?, ?, ?)');
     const info = stmt.run(name, meter_number, address, contact_number);
     logAudit(req.user.username, 'CONSUMERS', `Added consumer: ${name} (Meter: ${meter_number})`);
-    res.status(201).json({ id: info.lastInsertRowid, name, meter_number, address, contact_number });
+    res.status(201).json({ id: info.lastInsertRowid.toString(), name, meter_number, address, contact_number });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-app.get('/api/billings', (req, res) => {
+app.get('/api/billings', async (req, res) => {
   try {
-    const billings = db.prepare(`
+    const billings = (await db.execute(`
       SELECT b.*, c.name as consumer_name, c.address as consumer_address, c.meter_number as consumer_meter
       FROM billings b 
       JOIN consumers c ON b.consumer_id = c.id 
       ORDER BY b.billing_month DESC, c.name ASC
-    `).all();
+    `)).rows;
     res.json(billings);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-app.post('/api/billings', (req, res) => {
+app.post('/api/billings', async (req, res) => {
   const { consumer_id, billing_month, previous_reading, current_reading, due_date } = req.body;
   try {
-    const tenant = db.prepare('SELECT * FROM tenants LIMIT 1').get();
+    const tenant = (await db.execute('SELECT * FROM tenants LIMIT 1')).rows[0];
     let amount_due = 0;
     let consumption = null;
 
@@ -206,22 +206,22 @@ app.post('/api/billings', (req, res) => {
     `);
     const info = stmt.run(consumer_id, billing_month, parseFloat(previous_reading), parseFloat(current_reading), consumption, amount_due, due_date);
     logAudit(req.user.username, 'BILLING', `Generated bill for Consumer ID ${consumer_id} (${billing_month}) - Amount: ${amount_due}`);
-    res.status(201).json({ id: info.lastInsertRowid, consumer_id, amount_due });
+    res.status(201).json({ id: info.lastInsertRowid.toString(), consumer_id, amount_due });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-app.put('/api/billings/:id/adjust', (req, res) => {
+app.put('/api/billings/:id/adjust', async (req, res) => {
   const { id } = req.params;
   const { current_reading } = req.body;
 
   try {
-    const bill = db.prepare('SELECT * FROM billings WHERE id = ?').get(id);
+    const bill = (await db.execute({ sql: 'SELECT * FROM billings WHERE id = ?', args: [id] })).rows[0];
     if (!bill) return res.status(404).json({ error: 'Billing not found' });
     if (bill.status === 'PAID') return res.status(400).json({ error: 'Cannot adjust a fully paid bill' });
 
-    const tenantCheck = db.prepare('SELECT billing_type FROM tenants LIMIT 1').get();
+    const tenantCheck = (await db.execute('SELECT billing_type FROM tenants LIMIT 1')).rows[0];
     if (tenantCheck && tenantCheck.billing_type === 'FLAT') {
       return res.status(400).json({ error: 'Cannot adjust readings on flat rate billing. The amount is fixed.' });
     }
@@ -235,7 +235,7 @@ app.put('/api/billings/:id/adjust', (req, res) => {
     const payments = db.prepare('SELECT SUM(amount_paid) as total_paid FROM payments WHERE billing_id = ?').get(id);
     const totalPaid = payments.total_paid || 0;
 
-    const tenant = db.prepare('SELECT * FROM tenants LIMIT 1').get();
+    const tenant = (await db.execute('SELECT * FROM tenants LIMIT 1')).rows[0];
     let newAmountDue = 0;
     let newConsumption = null;
 
@@ -253,7 +253,7 @@ app.put('/api/billings/:id/adjust', (req, res) => {
     }
 
     if (newAmountDue < totalPaid) {
-      return res.status(400).json({ error: `Cannot adjust bill below what has already been paid (₱${totalPaid.toFixed(2)})` });
+      return res.status(400).json({ error: `Cannot adjust bill below what has already been paid (â‚±${totalPaid.toFixed(2)})` });
     }
 
     // Determine new status
@@ -275,7 +275,7 @@ app.put('/api/billings/:id/adjust', (req, res) => {
   }
 });
 
-app.post('/api/payments', (req, res) => {
+app.post('/api/payments', async (req, res) => {
   let { billing_id, amount_paid, payment_method, receipt_number } = req.body;
   try {
     const parsedAmount = parseFloat(amount_paid);
@@ -284,16 +284,16 @@ app.post('/api/payments', (req, res) => {
       return res.status(400).json({ error: 'Amount paid must be greater than 0' });
     }
 
-    db.prepare('BEGIN TRANSACTION').run();
+    await db.execute('BEGIN TRANSACTION');
     
-    const billing = db.prepare('SELECT amount_due, status FROM billings WHERE id = ?').get(billing_id);
+    const billing = (await db.execute({ sql: 'SELECT amount_due, status FROM billings WHERE id = ?', args: [billing_id] })).rows[0];
     if (!billing) {
-      db.prepare('ROLLBACK').run();
+      await db.execute('ROLLBACK');
       return res.status(404).json({ error: 'Billing not found' });
     }
     
     if (billing.status === 'PAID') {
-      db.prepare('ROLLBACK').run();
+      await db.execute('ROLLBACK');
       return res.status(400).json({ error: 'Billing is already fully paid' });
     }
 
@@ -330,8 +330,8 @@ app.post('/api/payments', (req, res) => {
     const updateBillingStmt = db.prepare('UPDATE billings SET status = ? WHERE id = ?');
     updateBillingStmt.run(newStatus, billing_id);
 
-    db.prepare('COMMIT').run();
-    logAudit(req.user.username, 'PAYMENT', `Recorded payment of ₱${parsedAmount} for Bill ID ${billing_id} (Receipt: ${receipt_number})`);
+    await db.execute('COMMIT');
+    logAudit(req.user.username, 'PAYMENT', `Recorded payment of â‚±${parsedAmount} for Bill ID ${billing_id} (Receipt: ${receipt_number})`);
 
     const remainingBalance = Math.max(0, billing.amount_due - totalPaidAfter);
 
@@ -342,24 +342,24 @@ app.post('/api/payments', (req, res) => {
       receipt_number,
       total_paid: totalPaidAfter,
       remaining_balance: remainingBalance,
-      payment_id: paymentInfo.lastInsertRowid
+      payment_id: paymentInfo.lastInsertRowid.toString()
     });
   } catch (error) {
-    db.prepare('ROLLBACK').run();
+    await db.execute('ROLLBACK');
     res.status(500).json({ error: error.message });
   }
 });
 
-app.get('/api/settings', (req, res) => {
+app.get('/api/settings', async (req, res) => {
   try {
-    const tenant = db.prepare('SELECT * FROM tenants LIMIT 1').get();
+    const tenant = (await db.execute('SELECT * FROM tenants LIMIT 1')).rows[0];
     res.json(tenant);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-app.put('/api/settings', requireSuperAdmin, (req, res) => {
+app.put('/api/settings', requireSuperAdmin, async (req, res) => {
   const { name, billing_type, flat_rate, minimum_cubic_meters, minimum_charge, rate_per_cubic_meter, currency } = req.body;
   try {
     const stmt = db.prepare(`
@@ -377,7 +377,7 @@ app.put('/api/settings', requireSuperAdmin, (req, res) => {
 
 // --- NEW Endpoints ---
 
-app.post('/api/consumers/batch', requireAdmin, (req, res) => {
+app.post('/api/consumers/batch', requireAdmin, async (req, res) => {
   const { consumers } = req.body;
   
   if (!Array.isArray(consumers)) {
@@ -411,26 +411,26 @@ app.post('/api/consumers/batch', requireAdmin, (req, res) => {
 
 // --- Meter Reading Endpoints ---
 
-app.get('/api/consumers/readings', (req, res) => {
+app.get('/api/consumers/readings', async (req, res) => {
   const { month } = req.query; // YYYY-MM
   try {
-    const consumers = db.prepare('SELECT id, name, meter_number, address FROM consumers ORDER BY name').all();
+    const consumers = (await db.execute('SELECT id, name, meter_number, address FROM consumers ORDER BY name')).rows;
     
-    const result = consumers.map(c => {
+    const result = await Promise.all(consumers.map(async c => {
       // Get the most recent billing for this consumer to find the last reading
-      const lastBill = db.prepare(`
+      const lastBill = (await db.execute({ sql: `
         SELECT current_reading, billing_month 
         FROM billings 
         WHERE consumer_id = ? 
         ORDER BY billing_month DESC, id DESC 
         LIMIT 1
-      `).get(c.id);
+      `, args: [c.id] })).rows[0];
 
       // Check if already billed for the requested month
       let already_billed = false;
       let billed_id = null;
       if (month) {
-        const existing = db.prepare('SELECT id FROM billings WHERE consumer_id = ? AND billing_month = ?').get(c.id, month);
+        const existing = (await db.execute({ sql: 'SELECT id FROM billings WHERE consumer_id = ? AND billing_month = ?', args: [c.id, month] })).rows[0];
         already_billed = !!existing;
         billed_id = existing ? existing.id : null;
       }
@@ -445,7 +445,7 @@ app.get('/api/consumers/readings', (req, res) => {
         already_billed,
         billed_id
       };
-    });
+    }));
 
     res.json(result);
   } catch (error) {
@@ -453,7 +453,7 @@ app.get('/api/consumers/readings', (req, res) => {
   }
 });
 
-app.post('/api/billings/batch', (req, res) => {
+app.post('/api/billings/batch', async (req, res) => {
   const { billing_month, due_date, readings } = req.body;
 
   if (!billing_month) {
@@ -464,7 +464,7 @@ app.post('/api/billings/batch', (req, res) => {
   }
 
   try {
-    const tenant = db.prepare('SELECT * FROM tenants LIMIT 1').get();
+    const tenant = (await db.execute('SELECT * FROM tenants LIMIT 1')).rows[0];
 
     const batchInsert = db.transaction((readingsList) => {
       let generated = 0;
@@ -524,7 +524,7 @@ app.post('/api/billings/batch', (req, res) => {
   }
 });
 
-app.get('/api/reports/collection-summary', (req, res) => {
+app.get('/api/reports/collection-summary', async (req, res) => {
   const { month } = req.query; // YYYY-MM
   try {
     let query = `
@@ -539,7 +539,7 @@ app.get('/api/reports/collection-summary', (req, res) => {
       params.push(month);
     }
     
-    const billsRaw = db.prepare(query).all(...params);
+    const billsRaw = (await db.execute({ sql: query, args: [...params] })).rows;
     let total_billed = 0;
     let total_collected = 0;
     
@@ -573,12 +573,12 @@ app.get('/api/reports/collection-summary', (req, res) => {
   }
 });
 
-app.get('/api/reports/consumer-ledger', (req, res) => {
+app.get('/api/reports/consumer-ledger', async (req, res) => {
   const { consumer_id } = req.query;
   if (!consumer_id) return res.status(400).json({ error: 'consumer_id required' });
 
   try {
-    const consumer = db.prepare('SELECT name, meter_number, address FROM consumers WHERE id = ?').get(consumer_id);
+    const consumer = (await db.execute({ sql: 'SELECT name, meter_number, address FROM consumers WHERE id = ?', args: [consumer_id] })).rows[0];
     if (!consumer) return res.status(404).json({ error: 'Consumer not found' });
 
     const ledgerRaw = db.prepare(`
@@ -607,7 +607,7 @@ app.get('/api/reports/consumer-ledger', (req, res) => {
   }
 });
 
-app.get('/api/reports/aging', (req, res) => {
+app.get('/api/reports/aging', async (req, res) => {
   try {
     const agingRaw = db.prepare(`
       SELECT c.id as consumer_id, c.name as consumer_name,
@@ -628,7 +628,7 @@ app.get('/api/reports/aging', (req, res) => {
   }
 });
 
-app.get('/api/dashboard', (req, res) => {
+app.get('/api/dashboard', async (req, res) => {
   try {
     const total_consumers = db.prepare('SELECT COUNT(*) as count FROM consumers').get().count;
     
@@ -641,13 +641,13 @@ app.get('/api/dashboard', (req, res) => {
     const total_pending = total_billed - total_collected;
     const collection_rate = total_billed > 0 ? ((total_collected / total_billed) * 100).toFixed(2) + '%' : '0%';
     
-    const recent_billings = db.prepare(`
+    const recent_billings = (await db.execute(`
       SELECT b.*, c.name as consumer_name
       FROM billings b
       JOIN consumers c ON b.consumer_id = c.id
       ORDER BY b.created_at DESC
       LIMIT 10
-    `).all();
+    `)).rows;
 
     res.json({
       total_consumers,
@@ -664,19 +664,19 @@ app.get('/api/dashboard', (req, res) => {
 });
 
 // --- Bill Notice Endpoint ---
-app.get('/api/billings/:billing_id/notice', (req, res) => {
+app.get('/api/billings/:billing_id/notice', async (req, res) => {
   const { billing_id } = req.params;
   try {
-    const bill = db.prepare(`
+    const bill = (await db.execute({ sql: `
       SELECT b.*, c.name as consumer_name, c.address as consumer_address, c.meter_number
       FROM billings b
       JOIN consumers c ON b.consumer_id = c.id
       WHERE b.id = ?
-    `).get(billing_id);
+    `, args: [billing_id] })).rows[0];
 
     if (!bill) return res.status(404).json({ error: 'Billing not found' });
 
-    const tenant = db.prepare('SELECT * FROM tenants LIMIT 1').get();
+    const tenant = (await db.execute('SELECT * FROM tenants LIMIT 1')).rows[0];
 
     res.json({
       billing_id: bill.id,
@@ -703,21 +703,21 @@ app.get('/api/billings/:billing_id/notice', (req, res) => {
 });
 
 // --- Receipt Endpoints ---
-app.get('/api/payments/receipt/:payment_id', (req, res) => {
+app.get('/api/payments/receipt/:payment_id', async (req, res) => {
   const { payment_id } = req.params;
   try {
-    const payment = db.prepare(`
+    const payment = (await db.execute({ sql: `
       SELECT p.*, b.billing_month, b.previous_reading, b.current_reading, b.consumption, b.amount_due,
              c.name as consumer_name, c.address as consumer_address, c.meter_number
       FROM payments p
       JOIN billings b ON p.billing_id = b.id
       JOIN consumers c ON b.consumer_id = c.id
       WHERE p.id = ?
-    `).get(payment_id);
+    `, args: [payment_id] })).rows[0];
 
     if (!payment) return res.status(404).json({ error: 'Payment not found' });
 
-    const tenant = db.prepare('SELECT name, billing_type FROM tenants LIMIT 1').get();
+    const tenant = (await db.execute('SELECT name, billing_type FROM tenants LIMIT 1')).rows[0];
 
     const totalPaidStmt = db.prepare('SELECT SUM(amount_paid) as total FROM payments WHERE billing_id = ?').get(payment.billing_id);
     const totalPaidForBill = totalPaidStmt.total || 0;
@@ -754,13 +754,13 @@ app.get('/api/payments/receipt/:payment_id', (req, res) => {
   }
 });
 
-app.get('/api/billings/:billing_id/payments', (req, res) => {
+app.get('/api/billings/:billing_id/payments', async (req, res) => {
   const { billing_id } = req.params;
   try {
-    const billing = db.prepare('SELECT * FROM billings WHERE id = ?').get(billing_id);
+    const billing = (await db.execute({ sql: 'SELECT * FROM billings WHERE id = ?', args: [billing_id] })).rows[0];
     if (!billing) return res.status(404).json({ error: 'Billing not found' });
 
-    const payments = db.prepare('SELECT id, amount_paid, payment_date, receipt_number FROM payments WHERE billing_id = ? ORDER BY payment_date DESC').all(billing_id);
+    const payments = (await db.execute({ sql: 'SELECT id, amount_paid, payment_date, receipt_number FROM payments WHERE billing_id = ? ORDER BY payment_date DESC', args: [billing_id] })).rows;
 
     const totalPaid = payments.reduce((sum, p) => sum + p.amount_paid, 0);
     const remainingBalance = Math.max(0, billing.amount_due - totalPaid);
@@ -798,7 +798,7 @@ app.get('/api/database/backup', requireSuperAdmin, async (req, res) => {
   }
 });
 
-app.post('/api/database/restore', requireSuperAdmin, upload.single('database'), (req, res) => {
+app.post('/api/database/restore', requireSuperAdmin, upload.single('database'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No database file uploaded' });
 
   try {
@@ -838,11 +838,11 @@ app.post('/api/database/restore', requireSuperAdmin, upload.single('database'), 
   }
 });
 
-app.post('/api/database/reset', requireSuperAdmin, (req, res) => {
+app.post('/api/database/reset', requireSuperAdmin, async (req, res) => {
   const { option } = req.body; // 'FULL' or 'KEEP_CONSUMERS'
   
   try {
-    db.exec('BEGIN TRANSACTION');
+    const tx = await db.transaction('write');
     
     db.exec('DELETE FROM payments');
     db.exec('DELETE FROM billings');
@@ -853,19 +853,19 @@ app.post('/api/database/reset', requireSuperAdmin, (req, res) => {
       db.exec("DELETE FROM sqlite_sequence WHERE name = 'consumers'");
     }
     
-    db.exec('COMMIT');
+    await tx.commit();
     logAudit(req.user.username, 'DATABASE', `Reset database records (Option: ${option})`);
     res.json({ message: 'Database reset successfully' });
   } catch (error) {
-    db.exec('ROLLBACK');
+    await tx.rollback();
     res.status(500).json({ error: error.message });
   }
 });
 
 // --- Audit Logs Endpoint ---
-app.get('/api/audit-logs', requireSuperAdmin, (req, res) => {
+app.get('/api/audit-logs', requireSuperAdmin, async (req, res) => {
   try {
-    const logs = db.prepare('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 500').all();
+    const logs = (await db.execute('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 500')).rows;
     res.json(logs);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -878,18 +878,18 @@ app.get('/api/readings/offline-sheet', async (req, res) => {
   if (!month) return res.status(400).json({ error: 'month is required (YYYY-MM)' });
 
   try {
-    const consumers = db.prepare('SELECT id, name, meter_number, address FROM consumers ORDER BY name').all();
+    const consumers = (await db.execute('SELECT id, name, meter_number, address FROM consumers ORDER BY name')).rows;
     
-    const consumersWithReadingsUnfiltered = consumers.map(c => {
-      const lastBill = db.prepare(`
+    const consumersWithReadingsUnfiltered = await Promise.all(consumers.map(async c => {
+      const lastBill = (await db.execute({ sql: `
         SELECT current_reading, billing_month 
         FROM billings 
         WHERE consumer_id = ? 
         ORDER BY billing_month DESC, id DESC 
         LIMIT 1
-      `).get(c.id);
+      `, args: [c.id] })).rows[0];
 
-      const existing = db.prepare('SELECT id FROM billings WHERE consumer_id = ? AND billing_month = ?').get(c.id, month);
+      const existing = (await db.execute({ sql: 'SELECT id FROM billings WHERE consumer_id = ? AND billing_month = ?', args: [c.id, month] })).rows[0];
 
       return {
         id: c.id,
@@ -899,14 +899,14 @@ app.get('/api/readings/offline-sheet', async (req, res) => {
         last_reading: lastBill ? lastBill.current_reading : 0,
         already_billed: !!existing
       };
-    }).filter(c => !c.already_billed);
+    })).filter(c => !c.already_billed);
 
     const consumersWithReadings = await Promise.all(consumersWithReadingsUnfiltered.map(async c => {
       const qrSvg = await QRCode.toString('WBP-' + c.id, { type: 'svg', margin: 0, color: { dark: '#000000', light: '#ffffff' } });
       return { ...c, qrSvg };
     }));
 
-    const tenant = db.prepare('SELECT * FROM tenants LIMIT 1').get();
+    const tenant = (await db.execute('SELECT * FROM tenants LIMIT 1')).rows[0];
 
     const html = `<!DOCTYPE html>
 <html lang="en">
@@ -960,21 +960,21 @@ app.get('/api/readings/offline-sheet', async (req, res) => {
 <body>
 
 <div class="header">
-  <h1>📋 Offline Meter Reading</h1>
-  <div class="meta">${tenant.name || 'Water District'} • Billing Month: <strong>${month}</strong> • ${consumersWithReadings.length} consumers</div>
+  <h1>ðŸ“‹ Offline Meter Reading</h1>
+  <div class="meta">${tenant.name || 'Water District'} â€¢ Billing Month: <strong>${month}</strong> â€¢ ${consumersWithReadings.length} consumers</div>
 </div>
 
 <div class="stats-bar">
   <div class="stat"><div class="label">Entered</div><div class="value" id="stat-entered">0</div></div>
   <div class="stat"><div class="label">Remaining</div><div class="value" id="stat-remaining">${consumersWithReadings.length}</div></div>
-  <div class="stat"><div class="label">Total m³</div><div class="value" id="stat-consumption">0</div></div>
+  <div class="stat"><div class="label">Total mÂ³</div><div class="value" id="stat-consumption">0</div></div>
 </div>
 
 <div class="search-wrap">
   <input type="text" id="searchInput" placeholder="Search consumer name or meter..." oninput="filterList()">
 </div>
 
-<div class="saved-indicator" id="savedIndicator">✓ Auto-saved</div>
+<div class="saved-indicator" id="savedIndicator">âœ“ Auto-saved</div>
 
 <div class="consumer-list" id="consumerList"></div>
 
@@ -1067,7 +1067,7 @@ function handleInput(consumerId, value, lastReading) {
   } else {
     card.className = 'consumer-card has-reading';
     const consumption = curr - lastReading;
-    badge.textContent = consumption.toFixed(1) + ' m³';
+    badge.textContent = consumption.toFixed(1) + ' mÂ³';
     badge.className = 'consumption-badge';
     if(printBtn) printBtn.disabled = false;
   }
@@ -1096,7 +1096,7 @@ function printBill(id) {
     
     breakdownHtml += \`
       <div style="display: flex; justify-content: space-between;">
-        <span>Min. (\${minCubic} m³):</span><span>₱ \${minCharge.toFixed(2)}</span>
+        <span>Min. (\${minCubic} mÂ³):</span><span>â‚± \${minCharge.toFixed(2)}</span>
       </div>\`;
       
     if (consumption > minCubic) {
@@ -1104,7 +1104,7 @@ function printBill(id) {
       const excessCharge = excess * TENANT.rate_per_cubic_meter;
       breakdownHtml += \`
       <div style="display: flex; justify-content: space-between;">
-        <span>Excess \${excess.toFixed(1)} m³:</span><span>₱ \${excessCharge.toFixed(2)}</span>
+        <span>Excess \${excess.toFixed(1)} mÂ³:</span><span>â‚± \${excessCharge.toFixed(2)}</span>
       </div>\`;
     }
     breakdownHtml += \`<div style="text-align: center; letter-spacing: -1px;">--------------------------------</div>\`;
@@ -1112,7 +1112,7 @@ function printBill(id) {
     amountDue = TENANT.flat_rate;
     breakdownHtml += \`
       <div style="display: flex; justify-content: space-between;">
-        <span>Flat Rate:</span><span>₱ \${amountDue.toFixed(2)}</span>
+        <span>Flat Rate:</span><span>â‚± \${amountDue.toFixed(2)}</span>
       </div>
       <div style="text-align: center; letter-spacing: -1px;">--------------------------------</div>\`;
   }
@@ -1151,7 +1151,7 @@ function printBill(id) {
         <span>Current Reading:</span><span>\${curr.toFixed(1)}</span>
       </div>
       <div style="display: flex; justify-content: space-between; font-weight: bold;">
-        <span>Consumption:</span><span>\${consumption.toFixed(1)} m³</span>
+        <span>Consumption:</span><span>\${consumption.toFixed(1)} mÂ³</span>
       </div>
       <div style="text-align: center; letter-spacing: -1px;">--------------------------------</div>
       
@@ -1160,7 +1160,7 @@ function printBill(id) {
       
       <!-- Amount Due -->
       <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 1.1rem;">
-        <span>AMOUNT DUE:</span><span>₱ \${amountDue.toFixed(2)}</span>
+        <span>AMOUNT DUE:</span><span>â‚± \${amountDue.toFixed(2)}</span>
       </div>
       <div style="text-align: center; letter-spacing: -1px;">================================</div>
       
@@ -1209,20 +1209,20 @@ function renderList(list) {
         badgeClass = 'consumption-badge invalid';
       } else {
         cardClass = 'consumer-card has-reading';
-        badgeText = (curr - c.last_reading).toFixed(1) + ' m³';
+        badgeText = (curr - c.last_reading).toFixed(1) + ' mÂ³';
       }
     }
 
     container.innerHTML += 
       '<div class="' + cardClass + '" id="card-' + c.id + '">' +
         '<div class="c-name">' + c.name + '</div>' +
-        '<div class="c-details">Meter: ' + (c.meter_number || 'N/A') + (c.address ? ' • ' + c.address : '') + '</div>' +
+        '<div class="c-details">Meter: ' + (c.meter_number || 'N/A') + (c.address ? ' â€¢ ' + c.address : '') + '</div>' +
         '<div class="reading-row">' +
           '<div class="prev-reading">Prev: <strong>' + c.last_reading + '</strong></div>' +
           '<input type="number" step="0.01" id="input-' + c.id + '" class="reading-input" placeholder="Current reading" value="' + val + '" ' +
             'oninput="handleInput(' + c.id + ', this.value, ' + c.last_reading + ')" inputmode="decimal">' +
           '<div class="' + badgeClass + '" id="badge-' + c.id + '">' + badgeText + '</div>' +
-          '<button id="print-btn-' + c.id + '" class="btn" style="padding: 0.3rem 0.5rem; margin-left: 0.25rem; font-size: 1rem; background: #3b82f6; color: white;" onclick="printBill(' + c.id + ')" ' + (val === '' || isNaN(curr) || curr < c.last_reading ? 'disabled' : '') + '>🖨️</button>' +
+          '<button id="print-btn-' + c.id + '" class="btn" style="padding: 0.3rem 0.5rem; margin-left: 0.25rem; font-size: 1rem; background: #3b82f6; color: white;" onclick="printBill(' + c.id + ')" ' + (val === '' || isNaN(curr) || curr < c.last_reading ? 'disabled' : '') + '>ðŸ–¨ï¸</button>' +
         '</div>' +
       '</div>';
   }
@@ -1315,7 +1315,7 @@ updateStats();
 });
 
 // --- Import Offline Readings ---
-app.post('/api/readings/import', (req, res) => {
+app.post('/api/readings/import', async (req, res) => {
   const { billing_month, readings } = req.body;
   
   if (!billing_month) return res.status(400).json({ error: 'billing_month is required' });
