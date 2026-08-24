@@ -111,7 +111,7 @@ const logAudit = async (username, action, details) => {
 // --- User Management Endpoints ---
 app.get('/api/users', requireSuperAdmin, async (req, res) => {
   try {
-    const users = (await db.execute('SELECT id, username, role, created_at FROM users ORDER BY created_at DESC')).rows;
+    const users = (await db.execute('SELECT id, username, role, assigned_purok, created_at FROM users ORDER BY created_at DESC')).rows;
     res.json(users);
   } catch (error) {
     res.status(500).json({ error: error.message });
