@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const cors = require('cors');
 require('dotenv').config();
 const db = require('./database');
@@ -90,10 +90,9 @@ const requireAdmin = (req, res, next) => {
 };
 
 // Audit Logging Helper
-const logAudit = (username, action, details) => {
+const logAudit = async (username, action, details) => {
   try {
-    const stmt = db.prepare('INSERT INTO audit_logs (username, action, details) VALUES (?, ?, ?)');
-    stmt.run(username, action, details);
+    await db.execute({ sql: 'INSERT INTO audit_logs (username, action, details) VALUES (?, ?, ?)', args: [username, action, details] });
   } catch (err) {
     console.error('Audit log failed:', err.message);
   }
@@ -115,8 +114,7 @@ app.post('/api/users', requireSuperAdmin, async (req, res) => {
     if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
     const userRole = (role === 'SUPER_ADMIN' || role === 'STAFF') ? role : 'ADMIN';
     const hash = bcrypt.hashSync(password, 10);
-    const stmt = db.prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)');
-    const info = stmt.run(username, hash, userRole);
+    const info = await db.execute({ sql: 'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)', args: [username, hash, userRole] });
     logAudit(req.user.username, 'USERS', `Created new user: ${username} (${userRole})`);
     res.status(201).json({ id: info.lastInsertRowid.toString(), username, role: userRole });
   } catch (error) {
@@ -155,8 +153,7 @@ app.get('/api/consumers', async (req, res) => {
 app.post('/api/consumers', requireAdmin, async (req, res) => {
   const { name, meter_number, address, contact_number } = req.body;
   try {
-    const stmt = db.prepare('INSERT INTO consumers (name, meter_number, address, contact_number) VALUES (?, ?, ?, ?)');
-    const info = stmt.run(name, meter_number, address, contact_number);
+    const info = await db.execute({ sql: 'INSERT INTO consumers (name, meter_number, address, contact_number) VALUES (?, ?, ?, ?)', args: [name, meter_number, address, contact_number] });
     logAudit(req.user.username, 'CONSUMERS', `Added consumer: ${name} (Meter: ${meter_number})`);
     res.status(201).json({ id: info.lastInsertRowid.toString(), name, meter_number, address, contact_number });
   } catch (error) {
@@ -200,11 +197,7 @@ app.post('/api/billings', async (req, res) => {
       amount_due = tenant.flat_rate;
     }
 
-    const stmt = db.prepare(`
-      INSERT INTO billings (consumer_id, billing_month, previous_reading, current_reading, consumption, amount_due, status, due_date)
-      VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)
-    `);
-    const info = stmt.run(consumer_id, billing_month, parseFloat(previous_reading), parseFloat(current_reading), consumption, amount_due, due_date);
+    const info = await db.execute({ sql: 'INSERT INTO billings (consumer_id, billing_month, previous_reading, current_reading, consumption, amount_due, status, due_date) VALUES (?, ?, ?, ?, ?, ?, \'PENDING\', ?)', args: [consumer_id, billing_month, parseFloat(previous_reading), parseFloat(current_reading), consumption, amount_due, due_date] });
     logAudit(req.user.username, 'BILLING', `Generated bill for Consumer ID ${consumer_id} (${billing_month}) - Amount: ${amount_due}`);
     res.status(201).json({ id: info.lastInsertRowid.toString(), consumer_id, amount_due });
   } catch (error) {
@@ -232,7 +225,7 @@ app.put('/api/billings/:id/adjust', async (req, res) => {
     }
 
     // Check payments so far
-    const payments = db.prepare('SELECT SUM(amount_paid) as total_paid FROM payments WHERE billing_id = ?').get(id);
+    const payments = (await db.execute({ sql: 'SELECT SUM(amount_paid) as total_paid FROM payments WHERE billing_id = ?', args: [id] })).rows[0];
     const totalPaid = payments.total_paid || 0;
 
     const tenant = (await db.execute('SELECT * FROM tenants LIMIT 1')).rows[0];
@@ -262,12 +255,7 @@ app.put('/api/billings/:id/adjust', async (req, res) => {
       newStatus = (newAmountDue === totalPaid) ? 'PAID' : 'PARTIAL';
     }
 
-    const stmt = db.prepare(`
-      UPDATE billings 
-      SET current_reading = ?, consumption = ?, amount_due = ?, status = ?
-      WHERE id = ?
-    `);
-    stmt.run(newCurr, newConsumption, newAmountDue, newStatus, id);
+    await db.execute({ sql: 'UPDATE billings SET current_reading = ?, consumption = ?, amount_due = ?, status = ? WHERE id = ?', args: [newCurr, newConsumption, newAmountDue, newStatus, id] });
     logAudit(req.user.username, 'BILLING', `Adjusted Bill ID ${id} to new reading ${newCurr}`);
     res.json({ message: 'Bill adjusted successfully', amount_due: newAmountDue, status: newStatus });
   } catch (error) {
@@ -306,14 +294,13 @@ app.post('/api/payments', async (req, res) => {
       const dateStr = `${year}${month}${day}`;
       
       const likeStr = `WB-${dateStr}-%`;
-      const countStmt = db.prepare('SELECT COUNT(*) as count FROM payments WHERE receipt_number LIKE ?');
-      const countResult = countStmt.get(likeStr);
+      const countResult = (await db.execute({ sql: 'SELECT COUNT(*) as count FROM payments WHERE receipt_number LIKE ?', args: [likeStr] })).rows[0];
       
       const seq = String(countResult.count + 1).padStart(4, '0');
       receipt_number = `WB-${dateStr}-${seq}`;
     }
 
-    const totalPaidStmt = db.prepare('SELECT SUM(amount_paid) as total FROM payments WHERE billing_id = ?').get(billing_id);
+    const totalPaidStmt = (await db.execute({ sql: 'SELECT SUM(amount_paid) as total FROM payments WHERE billing_id = ?', args: [billing_id] })).rows[0];
     const totalPaidBefore = totalPaidStmt.total || 0;
     const totalPaidAfter = totalPaidBefore + parsedAmount;
 
@@ -324,11 +311,8 @@ app.post('/api/payments', async (req, res) => {
       newStatus = 'PARTIAL';
     }
 
-    const paymentStmt = db.prepare('INSERT INTO payments (billing_id, amount_paid, payment_method, receipt_number) VALUES (?, ?, ?, ?)');
-    const paymentInfo = paymentStmt.run(billing_id, parsedAmount, payment_method, receipt_number);
-
-    const updateBillingStmt = db.prepare('UPDATE billings SET status = ? WHERE id = ?');
-    updateBillingStmt.run(newStatus, billing_id);
+    const paymentInfo = await db.execute({ sql: 'INSERT INTO payments (billing_id, amount_paid, payment_method, receipt_number) VALUES (?, ?, ?, ?)', args: [billing_id, parsedAmount, payment_method, receipt_number] });
+    await db.execute({ sql: 'UPDATE billings SET status = ? WHERE id = ?', args: [newStatus, billing_id] });
 
     await db.execute('COMMIT');
     logAudit(req.user.username, 'PAYMENT', `Recorded payment of â‚±${parsedAmount} for Bill ID ${billing_id} (Receipt: ${receipt_number})`);
@@ -362,12 +346,7 @@ app.get('/api/settings', async (req, res) => {
 app.put('/api/settings', requireSuperAdmin, async (req, res) => {
   const { name, billing_type, flat_rate, minimum_cubic_meters, minimum_charge, rate_per_cubic_meter, currency } = req.body;
   try {
-    const stmt = db.prepare(`
-      UPDATE tenants 
-      SET name = ?, billing_type = ?, flat_rate = ?, minimum_cubic_meters = ?, minimum_charge = ?, rate_per_cubic_meter = ?, currency = ? 
-      WHERE id = (SELECT id FROM tenants LIMIT 1)
-    `);
-    stmt.run(name, billing_type, parseFloat(flat_rate), parseFloat(minimum_cubic_meters) || 0, parseFloat(minimum_charge) || 0, parseFloat(rate_per_cubic_meter), currency);
+    await db.execute({ sql: 'UPDATE tenants SET name = ?, billing_type = ?, flat_rate = ?, minimum_cubic_meters = ?, minimum_charge = ?, rate_per_cubic_meter = ?, currency = ? WHERE id = (SELECT id FROM tenants LIMIT 1)', args: [name, billing_type, parseFloat(flat_rate), parseFloat(minimum_cubic_meters) || 0, parseFloat(minimum_charge) || 0, parseFloat(rate_per_cubic_meter), currency] });
     logAudit(req.user.username, 'SETTINGS', `Updated system settings`);
     res.json({ message: 'Settings updated successfully' });
   } catch (error) {
@@ -384,24 +363,21 @@ app.post('/api/consumers/batch', requireAdmin, async (req, res) => {
     return res.status(400).json({ error: 'Consumers must be an array' });
   }
 
-  const insertMany = db.transaction((consumersList) => {
+  try {
+    const tx = await db.transaction('write');
     let inserted = 0;
     let errors = [];
-    const stmt = db.prepare('INSERT INTO consumers (name, meter_number, address, contact_number) VALUES (?, ?, ?, ?)');
-    
-    for (const c of consumersList) {
+    for (const c of consumers) {
       try {
-        stmt.run(c.name, c.meter_number, c.address, c.contact_number);
+        await tx.execute({ sql: 'INSERT INTO consumers (name, meter_number, address, contact_number) VALUES (?, ?, ?, ?)', args: [c.name, c.meter_number, c.address, c.contact_number] });
         inserted++;
       } catch (err) {
         errors.push({ consumer: c, error: err.message });
       }
     }
-    return { inserted, errors };
-  });
-
-  try {
-    const result = insertMany(consumers);
+    await tx.commit();
+    const result = { inserted, errors };
+    
     logAudit(req.user.username, 'CONSUMERS', `Batch uploaded ${result.inserted} consumers`);
     res.status(201).json(result);
   } catch (error) {
@@ -466,17 +442,12 @@ app.post('/api/billings/batch', async (req, res) => {
   try {
     const tenant = (await db.execute('SELECT * FROM tenants LIMIT 1')).rows[0];
 
-    const batchInsert = db.transaction((readingsList) => {
-      let generated = 0;
-      let total_amount = 0;
-      const errors = [];
-
-      const insertStmt = db.prepare(`
-        INSERT INTO billings (consumer_id, billing_month, previous_reading, current_reading, consumption, amount_due, status, due_date)
-        VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)
-      `);
-
-      for (const r of readingsList) {
+    const tx = await db.transaction('write');
+    let generated = 0;
+    let total_amount = 0;
+    const errors = [];
+    try {
+      for (const r of readings) {
         try {
           const prev = parseFloat(r.previous_reading) || 0;
           const curr = parseFloat(r.current_reading);
@@ -506,18 +477,22 @@ app.post('/api/billings/batch', async (req, res) => {
             amount_due = tenant.flat_rate;
           }
 
-          insertStmt.run(r.consumer_id, billing_month, prev, curr, consumption, amount_due, due_date || null);
+          await tx.execute({
+            sql: "INSERT INTO billings (consumer_id, billing_month, previous_reading, current_reading, consumption, amount_due, status, due_date) VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)",
+            args: [r.consumer_id, billing_month, prev, curr, consumption, amount_due, due_date || null]
+          });
           generated++;
           total_amount += amount_due;
         } catch (err) {
           errors.push({ consumer_id: r.consumer_id, error: err.message });
         }
       }
-
-      return { generated, total_amount, errors };
-    });
-
-    const result = batchInsert(readings);
+      await tx.commit();
+    } catch(e) {
+      await tx.rollback();
+      throw e;
+    }
+    const result = { generated, total_amount, errors };
     res.status(201).json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -581,13 +556,13 @@ app.get('/api/reports/consumer-ledger', async (req, res) => {
     const consumer = (await db.execute({ sql: 'SELECT name, meter_number, address FROM consumers WHERE id = ?', args: [consumer_id] })).rows[0];
     if (!consumer) return res.status(404).json({ error: 'Consumer not found' });
 
-    const ledgerRaw = db.prepare(`
+    const ledgerRaw = (await db.execute({ sql: `
       SELECT b.billing_month, b.consumption, b.amount_due, b.status,
              (SELECT SUM(amount_paid) FROM payments WHERE billing_id = b.id) as amount_paid
       FROM billings b
       WHERE b.consumer_id = ?
       ORDER BY b.billing_month ASC
-    `).all(consumer_id);
+    `, args: [consumer_id] })).rows;
 
     const ledger = ledgerRaw.map(l => {
       const paid = l.amount_paid || 0;
@@ -609,7 +584,7 @@ app.get('/api/reports/consumer-ledger', async (req, res) => {
 
 app.get('/api/reports/aging', async (req, res) => {
   try {
-    const agingRaw = db.prepare(`
+    const agingRaw = (await db.execute(`
       SELECT c.id as consumer_id, c.name as consumer_name,
              SUM(b.amount_due - IFNULL((SELECT SUM(amount_paid) FROM payments WHERE billing_id = b.id), 0)) as total_unpaid,
              MIN(b.billing_month) as oldest_unpaid_month,
@@ -620,7 +595,7 @@ app.get('/api/reports/aging', async (req, res) => {
       GROUP BY c.id
       HAVING total_unpaid > 0
       ORDER BY total_unpaid DESC
-    `).all();
+    `)).rows;
 
     res.json({ aging: agingRaw });
   } catch (error) {
@@ -630,12 +605,12 @@ app.get('/api/reports/aging', async (req, res) => {
 
 app.get('/api/dashboard', async (req, res) => {
   try {
-    const total_consumers = db.prepare('SELECT COUNT(*) as count FROM consumers').get().count;
+    const total_consumers = (await db.execute('SELECT COUNT(*) as count FROM consumers')).rows[0].count;
     
-    const billedStmt = db.prepare('SELECT SUM(amount_due) as total FROM billings').get();
+    const billedStmt = (await db.execute('SELECT SUM(amount_due) as total FROM billings')).rows[0];
     const total_billed = billedStmt.total || 0;
     
-    const collectedStmt = db.prepare('SELECT SUM(amount_paid) as total FROM payments').get();
+    const collectedStmt = (await db.execute('SELECT SUM(amount_paid) as total FROM payments')).rows[0];
     const total_collected = collectedStmt.total || 0;
     
     const total_pending = total_billed - total_collected;
@@ -719,7 +694,7 @@ app.get('/api/payments/receipt/:payment_id', async (req, res) => {
 
     const tenant = (await db.execute('SELECT name, billing_type FROM tenants LIMIT 1')).rows[0];
 
-    const totalPaidStmt = db.prepare('SELECT SUM(amount_paid) as total FROM payments WHERE billing_id = ?').get(payment.billing_id);
+    const totalPaidStmt = (await db.execute({ sql: 'SELECT SUM(amount_paid) as total FROM payments WHERE billing_id = ?', args: [payment.billing_id] })).rows[0];
     const totalPaidForBill = totalPaidStmt.total || 0;
     const remainingBalance = Math.max(0, payment.amount_due - totalPaidForBill);
 
