@@ -464,7 +464,12 @@ app.post('/api/consumers/batch', requireAdmin, async (req, res) => {
 app.get('/api/consumers/readings', async (req, res) => {
   const { month } = req.query; // YYYY-MM
   try {
-    const consumers = (await db.execute('SELECT id, name, meter_number, address FROM consumers ORDER BY name')).rows;
+    let consumers;
+    if (req.user.role === 'STAFF' && req.user.assigned_purok) {
+      consumers = (await db.execute({ sql: 'SELECT id, name, meter_number, address, purok FROM consumers WHERE purok = ? ORDER BY name', args: [req.user.assigned_purok] })).rows;
+    } else {
+      consumers = (await db.execute('SELECT id, name, meter_number, address, purok FROM consumers ORDER BY name')).rows;
+    }
     
     const result = await Promise.all(consumers.map(async c => {
       // Get the most recent billing for this consumer to find the last reading

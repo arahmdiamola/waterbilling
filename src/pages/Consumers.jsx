@@ -139,7 +139,7 @@ function Consumers() {
     if (file) processCsv(file);
   };
 
-  const processCsv = (file) => {
+      const processCsv = (file) => {
     setCsvFile(file);
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -161,7 +161,8 @@ function Consumers() {
             name: parts[0]?.trim() || '',
             meter_number: parts[1]?.trim() || '',
             address: parts[2]?.trim() || '',
-            contact_number: parts[3]?.trim() || ''
+            contact_number: parts[3]?.trim() || '',
+            purok: parts[4]?.trim() || ''
           });
         }
       }
@@ -411,7 +412,7 @@ function Consumers() {
                   <svg className="upload-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
                   <p className="upload-text">Drag and drop your CSV file here, or click to browse</p>
                   <input type="file" id="csv-upload" accept=".csv" style={{ display: 'none' }} onChange={handleFileChange} />
-                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Expected format: name, meter_number, address, contact_number</p>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Expected format: name, meter_number, address, contact_number, purok</p>
                 </div>
               ) : (
                 <div>
@@ -427,6 +428,7 @@ function Consumers() {
                           <th>Name</th>
                           <th>Meter</th>
                           <th>Address</th>
+                          <th>Purok</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -435,6 +437,7 @@ function Consumers() {
                             <td>{row.name}</td>
                             <td>{row.meter_number}</td>
                             <td>{row.address}</td>
+                            <td>{row.purok}</td>
                           </tr>
                         ))}
                       </tbody>
