@@ -170,7 +170,7 @@ app.post('/api/consumers', requireAdmin, async (req, res) => {
   const { name, meter_number, address, contact_number, purok } = req.body;
   try {
     const consumerPurok = (req.user.role === 'STAFF' && req.user.assigned_purok) ? req.user.assigned_purok : (purok || null);
-    const info = await db.execute({ sql: 'INSERT INTO consumers (name, meter_number, address, contact_number, purok) VALUES (?, ?, ?, ?, ?)', args: [name, meter_number, address, contact_number, consumerPurok] });
+    const info = await db.execute({ sql: 'INSERT INTO consumers (name, meter_number, address, contact_number, purok) VALUES (?, ?, ?, ?, ?)', args: [name, meter_number || null, address, contact_number, consumerPurok] });
     logAudit(req.user.username, 'CONSUMERS', `Added consumer: ${name} (Meter: ${meter_number})`);
     res.status(201).json({ id: info.lastInsertRowid.toString(), name, meter_number, address, contact_number, purok: consumerPurok });
   } catch (error) {
@@ -184,7 +184,7 @@ app.put('/api/consumers/:id', requireSuperAdmin, async (req, res) => {
   try {
     await db.execute({ 
       sql: 'UPDATE consumers SET name = ?, meter_number = ?, address = ?, contact_number = ?, purok = ? WHERE id = ?', 
-      args: [name, meter_number, address, contact_number, purok || null, id] 
+      args: [name, meter_number || null, address, contact_number, purok || null, id] 
     });
     logAudit(req.user.username, 'CONSUMERS', `Updated consumer ID ${id}: ${name}`);
     res.json({ message: 'Consumer updated successfully' });
@@ -443,7 +443,7 @@ app.post('/api/consumers/batch', requireAdmin, async (req, res) => {
     for (const c of consumers) {
       try {
         const consumerPurok = (req.user.role === 'STAFF' && req.user.assigned_purok) ? req.user.assigned_purok : (c.purok || null);
-        await tx.execute({ sql: 'INSERT INTO consumers (name, meter_number, address, contact_number, purok) VALUES (?, ?, ?, ?, ?)', args: [c.name, c.meter_number, c.address, c.contact_number, consumerPurok] });
+        await tx.execute({ sql: 'INSERT INTO consumers (name, meter_number, address, contact_number, purok) VALUES (?, ?, ?, ?, ?)', args: [c.name, c.meter_number || null, c.address, c.contact_number, consumerPurok] });
         inserted++;
       } catch (err) {
         errors.push({ consumer: c, error: err.message });
