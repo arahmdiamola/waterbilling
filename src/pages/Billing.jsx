@@ -12,6 +12,8 @@ function Billing() {
   const [consumers, setConsumers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [selectedBills, setSelectedBills] = useState([]);
+  const [batchPayLoading, setBatchPayLoading] = useState(false);
 
   const [showBillModal, setShowBillModal] = useState(false);
   const [showPayModal, setShowPayModal] = useState(false);
@@ -51,6 +53,50 @@ function Billing() {
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  const handleSelectAll = (e, filteredBills) => {
+    if (e.target.checked) {
+      const payable = filteredBills.filter(b => b.status !== 'PAID').map(b => b.id);
+      setSelectedBills(payable);
+    } else {
+      setSelectedBills([]);
+    }
+  };
+
+  const handleSelectBill = (id) => {
+    setSelectedBills(prev => 
+      prev.includes(id) ? prev.filter(bId => bId !== id) : [...prev, id]
+    );
+  };
+
+  const handleBatchPay = async () => {
+    if (selectedBills.length === 0) return;
+    if (!window.confirm(`Are you sure you want to mark ${selectedBills.length} bills as PAID?`)) return;
+
+    setBatchPayLoading(true);
+    try {
+      const res = await fetchWithAuth('/api/payments/batch', {
+        method: 'POST',
+        body: JSON.stringify({
+          billing_ids: selectedBills,
+          payment_method: 'CASH'
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        addToast(`Batch payment successful! ${data.bills_paid} bills paid.`);
+        setSelectedBills([]);
+        fetchData();
+      } else {
+        const err = await res.json();
+        addToast(err.error || 'Batch payment failed', 'error');
+      }
+    } catch (err) {
+      addToast('Network error during batch payment', 'error');
+    } finally {
+      setBatchPayLoading(false);
+    }
+  };
 
   const handleBillSubmit = async (e) => {
     e.preventDefault();
@@ -192,6 +238,16 @@ function Billing() {
       <div className="page-header print-hide">
         <h1 className="page-title">Billing & Payments</h1>
         <div className="header-actions">
+          {selectedBills.length > 0 && (
+            <button 
+              className="btn btn-primary" 
+              style={{ backgroundColor: 'var(--success)', borderColor: 'var(--success)', marginRight: '1rem' }}
+              onClick={handleBatchPay}
+              disabled={batchPayLoading}
+            >
+              {batchPayLoading ? 'Processing...' : `Pay Selected (${selectedBills.length})`}
+            </button>
+          )}
           <button className="btn btn-primary" onClick={() => setShowBillModal(true)}>
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
             Generate Bill
@@ -219,6 +275,31 @@ function Billing() {
             <table>
               <thead>
                 <tr>
+                  <th style={{ width: '40px' }}>
+                    <input 
+                      type="checkbox" 
+                      onChange={(e) => handleSelectAll(e, bills.filter(b => {
+                        const term = search.toLowerCase();
+                        if (term.startsWith('wbp-')) return String(b.consumer_id) === term.replace('wbp-', '');
+                        return b.consumer_name?.toLowerCase().includes(term) ||
+                               b.consumer_address?.toLowerCase().includes(term) ||
+                               b.consumer_meter?.toLowerCase().includes(term) ||
+                               b.billing_month?.toLowerCase().includes(term) ||
+                               b.status?.toLowerCase().includes(term) ||
+                               b.id?.toString().includes(term);
+                      }))}
+                      checked={selectedBills.length > 0 && selectedBills.length === bills.filter(b => {
+                        const term = search.toLowerCase();
+                        if (term.startsWith('wbp-')) return String(b.consumer_id) === term.replace('wbp-', '');
+                        return b.consumer_name?.toLowerCase().includes(term) ||
+                               b.consumer_address?.toLowerCase().includes(term) ||
+                               b.consumer_meter?.toLowerCase().includes(term) ||
+                               b.billing_month?.toLowerCase().includes(term) ||
+                               b.status?.toLowerCase().includes(term) ||
+                               b.id?.toString().includes(term);
+                      }).filter(b => b.status !== 'PAID').length}
+                    />
+                  </th>
                   <th>ID</th>
                   <th>Consumer</th>
                   <th>Month</th>
@@ -245,6 +326,15 @@ function Billing() {
                          b.id?.toString().includes(term);
                 }).map(bill => (
                   <tr key={bill.id}>
+                    <td>
+                      {bill.status !== 'PAID' && (
+                        <input 
+                          type="checkbox" 
+                          checked={selectedBills.includes(bill.id)}
+                          onChange={() => handleSelectBill(bill.id)}
+                        />
+                      )}
+                    </td>
                     <td>#{bill.id}</td>
                     <td>{bill.consumer_name}</td>
                     <td>{bill.billing_month}</td>

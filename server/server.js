@@ -514,6 +514,63 @@ app.post('/api/payments', async (req, res) => {
   }
 });
 
+// --- Batch Payment ---
+app.post('/api/payments/batch', requireAdmin, async (req, res) => {
+  const { billing_ids, payment_method } = req.body;
+  
+  if (!Array.isArray(billing_ids) || billing_ids.length === 0) {
+    return res.status(400).json({ error: 'billing_ids must be a non-empty array' });
+  }
+
+  try {
+    const tx = await db.transaction('write');
+    const results = [];
+    let totalAmountPaid = 0;
+
+    // Generate receipt number base
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    const dateStr = `${year}${month}${day}`;
+    const likeStr = `WB-${dateStr}-%`;
+    const countResult = (await tx.execute({ sql: 'SELECT COUNT(*) as count FROM payments WHERE receipt_number LIKE ?', args: [likeStr] })).rows[0];
+    let seqNum = (countResult.count || 0) + 1;
+
+    for (const billing_id of billing_ids) {
+      const billing = (await tx.execute({ sql: 'SELECT id, amount_due, status, billing_month, consumer_id FROM billings WHERE id = ?', args: [billing_id] })).rows[0];
+      if (!billing || billing.status === 'PAID') continue;
+
+      // Calculate remaining balance for this bill
+      const paidRes = (await tx.execute({ sql: 'SELECT COALESCE(SUM(amount_paid), 0) as total FROM payments WHERE billing_id = ?', args: [billing_id] })).rows[0];
+      const alreadyPaid = paidRes.total || 0;
+      const remaining = Math.max(0, billing.amount_due - alreadyPaid);
+      if (remaining <= 0) continue;
+
+      const receipt_number = `WB-${dateStr}-${String(seqNum).padStart(4, '0')}`;
+      seqNum++;
+
+      await tx.execute({ sql: 'INSERT INTO payments (billing_id, amount_paid, payment_method, receipt_number) VALUES (?, ?, ?, ?)', args: [billing_id, remaining, payment_method || 'CASH', receipt_number] });
+      await tx.execute({ sql: "UPDATE billings SET status = 'PAID' WHERE id = ?", args: [billing_id] });
+
+      totalAmountPaid += remaining;
+      results.push({ billing_id, billing_month: billing.billing_month, amount_paid: remaining, receipt_number });
+    }
+
+    await tx.commit();
+    logAudit(req.user.username, 'PAYMENT', `Batch payment: ${results.length} bills paid, total PHP ${totalAmountPaid.toFixed(2)}`);
+
+    res.status(201).json({
+      success: true,
+      bills_paid: results.length,
+      total_amount_paid: totalAmountPaid,
+      payments: results
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/settings', async (req, res) => {
   try {
     const tenant = (await db.execute('SELECT * FROM tenants LIMIT 1')).rows[0];
