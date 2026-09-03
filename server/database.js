@@ -19,7 +19,8 @@ const initDb = async () => {
       minimum_cubic_meters REAL DEFAULT 10,
       minimum_charge REAL DEFAULT 150,
       rate_per_cubic_meter REAL,
-      currency TEXT DEFAULT 'PHP'
+      currency TEXT DEFAULT 'PHP',
+      disconnect_months INTEGER DEFAULT 3
     );
 
     CREATE TABLE IF NOT EXISTS users (
@@ -38,6 +39,7 @@ const initDb = async () => {
       address TEXT,
       contact_number TEXT,
       purok TEXT,
+      status TEXT DEFAULT 'ACTIVE',
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -122,6 +124,22 @@ const initDb = async () => {
     await db.execute("SELECT assigned_purok FROM users LIMIT 1");
   } catch (e) {
     await db.execute("ALTER TABLE users ADD COLUMN assigned_purok TEXT");
+  }
+
+  // Migrate: add disconnect_months to tenants
+  try {
+    await db.execute("SELECT disconnect_months FROM tenants LIMIT 1");
+  } catch (e) {
+    await db.execute("ALTER TABLE tenants ADD COLUMN disconnect_months INTEGER DEFAULT 3");
+    await db.execute("UPDATE tenants SET disconnect_months = 3");
+  }
+
+  // Migrate: add status column to consumers
+  try {
+    await db.execute("SELECT status FROM consumers LIMIT 1");
+  } catch (e) {
+    await db.execute("ALTER TABLE consumers ADD COLUMN status TEXT DEFAULT 'ACTIVE'");
+    await db.execute("UPDATE consumers SET status = 'ACTIVE'");
   }
 };
 

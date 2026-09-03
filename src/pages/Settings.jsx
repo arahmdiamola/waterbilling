@@ -11,7 +11,8 @@ function Settings() {
     minimum_cubic_meters: 10,
     minimum_charge: 150,
     rate_per_cubic_meter: 0,
-    currency: 'PHP'
+    currency: 'PHP',
+    disconnect_months: 3
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -325,6 +326,24 @@ function Settings() {
               value={settings.currency} 
               onChange={e => setSettings({ ...settings, currency: e.target.value })} 
             />
+          </div>
+
+          <div style={{ padding: '1rem', background: 'rgba(239, 68, 68, 0.06)', borderRadius: '0.75rem', border: '1px solid rgba(239, 68, 68, 0.15)', marginBottom: '1rem' }}>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+              <strong style={{ color: 'var(--text-main)' }}>Disconnection Policy:</strong> Consumers with unpaid bills equal to or exceeding this threshold will appear in the Service Status page for disconnection.
+            </p>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Months Before Disconnection</label>
+              <input 
+                type="number" 
+                min="1" 
+                max="24"
+                className="form-input" 
+                required 
+                value={settings.disconnect_months} 
+                onChange={e => setSettings({ ...settings, disconnect_months: e.target.value })} 
+              />
+            </div>
           </div>
 
           <div style={{ marginTop: '2rem' }}>

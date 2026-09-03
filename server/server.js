@@ -232,6 +232,89 @@ app.get('/api/consumers/:id/analytics', async (req, res) => {
   }
 });
 
+// --- Service Status Endpoints ---
+
+// Get consumers needing disconnection (unpaid for X months) and consumers marked for repair
+app.get('/api/service-status', async (req, res) => {
+  try {
+    const tenant = (await db.execute('SELECT disconnect_months FROM tenants LIMIT 1')).rows[0];
+    const disconnectMonths = tenant?.disconnect_months || 3;
+
+    // Find consumers with consecutive unpaid months >= disconnect_months
+    const allConsumers = (await db.execute('SELECT id, name, meter_number, address, purok, status, contact_number FROM consumers ORDER BY name')).rows;
+    
+    const forDisconnection = [];
+    const forRepair = [];
+    const disconnected = [];
+
+    for (const c of allConsumers) {
+      if (c.status === 'FOR_REPAIR') {
+        forRepair.push(c);
+      }
+      if (c.status === 'DISCONNECTED') {
+        disconnected.push(c);
+      }
+      
+      // Check unpaid bills count
+      const unpaidRes = await db.execute({ 
+        sql: `SELECT COUNT(*) as unpaid_count, MIN(billing_month) as oldest_unpaid, SUM(amount_due) as total_due
+              FROM billings 
+              WHERE consumer_id = ? AND status != 'PAID'`, 
+        args: [c.id] 
+      });
+      const unpaidCount = unpaidRes.rows[0].unpaid_count || 0;
+      
+      if (unpaidCount >= disconnectMonths && c.status !== 'DISCONNECTED') {
+        // Get total paid for this consumer's unpaid bills
+        const paidRes = await db.execute({
+          sql: `SELECT COALESCE(SUM(p.amount_paid), 0) as total_paid
+                FROM payments p
+                JOIN billings b ON p.billing_id = b.id
+                WHERE b.consumer_id = ? AND b.status != 'PAID'`,
+          args: [c.id]
+        });
+        
+        forDisconnection.push({
+          ...c,
+          unpaid_months: unpaidCount,
+          oldest_unpaid: unpaidRes.rows[0].oldest_unpaid,
+          total_due: unpaidRes.rows[0].total_due || 0,
+          total_paid: paidRes.rows[0].total_paid || 0,
+          balance: (unpaidRes.rows[0].total_due || 0) - (paidRes.rows[0].total_paid || 0)
+        });
+      }
+    }
+
+    res.json({
+      disconnect_months: disconnectMonths,
+      for_disconnection: forDisconnection,
+      for_repair: forRepair,
+      disconnected
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update consumer service status
+app.put('/api/consumers/:id/status', requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body; // ACTIVE, FOR_REPAIR, DISCONNECTED
+  
+  const validStatuses = ['ACTIVE', 'FOR_REPAIR', 'DISCONNECTED'];
+  if (!validStatuses.includes(status)) {
+    return res.status(400).json({ error: 'Invalid status. Must be ACTIVE, FOR_REPAIR, or DISCONNECTED' });
+  }
+  
+  try {
+    await db.execute({ sql: 'UPDATE consumers SET status = ? WHERE id = ?', args: [status, id] });
+    logAudit(req.user.username, 'SERVICE_STATUS', `Changed consumer ID ${id} status to ${status}`);
+    res.json({ message: 'Consumer status updated successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/billings', async (req, res) => {
   try {
     let billings;
@@ -441,9 +524,9 @@ app.get('/api/settings', async (req, res) => {
 });
 
 app.put('/api/settings', requireSuperAdmin, async (req, res) => {
-  const { name, billing_type, flat_rate, minimum_cubic_meters, minimum_charge, rate_per_cubic_meter, currency } = req.body;
+  const { name, billing_type, flat_rate, minimum_cubic_meters, minimum_charge, rate_per_cubic_meter, currency, disconnect_months } = req.body;
   try {
-    await db.execute({ sql: 'UPDATE tenants SET name = ?, billing_type = ?, flat_rate = ?, minimum_cubic_meters = ?, minimum_charge = ?, rate_per_cubic_meter = ?, currency = ? WHERE id = (SELECT id FROM tenants LIMIT 1)', args: [name, billing_type, parseFloat(flat_rate), parseFloat(minimum_cubic_meters) || 0, parseFloat(minimum_charge) || 0, parseFloat(rate_per_cubic_meter), currency] });
+    await db.execute({ sql: 'UPDATE tenants SET name = ?, billing_type = ?, flat_rate = ?, minimum_cubic_meters = ?, minimum_charge = ?, rate_per_cubic_meter = ?, currency = ?, disconnect_months = ? WHERE id = (SELECT id FROM tenants LIMIT 1)', args: [name, billing_type, parseFloat(flat_rate), parseFloat(minimum_cubic_meters) || 0, parseFloat(minimum_charge) || 0, parseFloat(rate_per_cubic_meter), currency, parseInt(disconnect_months) || 3] });
     logAudit(req.user.username, 'SETTINGS', `Updated system settings`);
     res.json({ message: 'Settings updated successfully' });
   } catch (error) {
