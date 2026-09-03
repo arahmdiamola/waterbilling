@@ -208,6 +208,30 @@ app.delete('/api/consumers/:id', requireSuperAdmin, async (req, res) => {
   }
 });
 
+// --- Consumer Analytics ---
+app.get('/api/consumers/:id/analytics', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const billedRes = await db.execute({ sql: 'SELECT SUM(amount_due) as total_billed, SUM(consumption) as total_consumption, COUNT(*) as total_bills FROM billings WHERE consumer_id = ?', args: [id] });
+    const paidRes = await db.execute({ sql: 'SELECT SUM(amount_paid) as total_paid FROM payments p JOIN billings b ON p.billing_id = b.id WHERE b.consumer_id = ?', args: [id] });
+    
+    const total_billed = billedRes.rows[0].total_billed || 0;
+    const total_consumption = billedRes.rows[0].total_consumption || 0;
+    const total_bills = billedRes.rows[0].total_bills || 0;
+    const total_paid = paidRes.rows[0].total_paid || 0;
+    
+    res.json({
+      total_billed,
+      total_paid,
+      total_pending: total_billed - total_paid,
+      total_consumption,
+      total_bills
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/billings', async (req, res) => {
   try {
     let billings;

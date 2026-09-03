@@ -15,6 +15,9 @@ function Consumers() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [printConsumer, setPrintConsumer] = useState(null);
+  const [analyticsConsumer, setAnalyticsConsumer] = useState(null);
+  const [analyticsData, setAnalyticsData] = useState(null);
+  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
   
   const tagRef = useRef(null);
   
@@ -37,6 +40,26 @@ function Consumers() {
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 3000);
+  };
+
+  const openAnalytics = async (consumer) => {
+    setAnalyticsConsumer(consumer);
+    setLoadingAnalytics(true);
+    try {
+      const response = await fetchWithAuth(`/api/consumers/${consumer.id}/analytics`);
+      if (response.ok) {
+        const data = await response.json();
+        setAnalyticsData(data);
+      } else {
+        addToast('Failed to load analytics', 'error');
+        setAnalyticsConsumer(null);
+      }
+    } catch (err) {
+      addToast('Error loading analytics', 'error');
+      setAnalyticsConsumer(null);
+    } finally {
+      setLoadingAnalytics(false);
+    }
   };
 
   const fetchConsumers = async () => {
@@ -274,17 +297,24 @@ function Consumers() {
                         Download QR
                         </button>
                         {userRole === 'SUPER_ADMIN' && (
-                          <>
-                            <button 
-                              className="btn btn-secondary" 
-                              style={{ padding: '0.4rem 0.6rem', fontSize: '0.75rem', marginRight: '0.5rem' }}
-                              onClick={() => {
-                                setEditForm({ id: c.id, name: c.name, meter_number: c.meter_number || '', address: c.address || '', contact_number: c.contact_number || '', purok: c.purok || '' });
-                                setShowEditModal(true);
-                              }}
-                            >
-                              Edit
-                            </button>
+                            <>
+                              <button 
+                                className="btn btn-primary" 
+                                style={{ padding: '0.4rem 0.6rem', fontSize: '0.75rem', marginRight: '0.5rem', backgroundColor: 'var(--primary)', color: 'white' }}
+                                onClick={() => openAnalytics(c)}
+                              >
+                                Analytics
+                              </button>
+                              <button 
+                                className="btn btn-secondary" 
+                                style={{ padding: '0.4rem 0.6rem', fontSize: '0.75rem', marginRight: '0.5rem' }}
+                                onClick={() => {
+                                  setEditForm({ id: c.id, name: c.name, meter_number: c.meter_number || '', address: c.address || '', contact_number: c.contact_number || '', purok: c.purok || '' });
+                                  setShowEditModal(true);
+                                }}
+                              >
+                                Edit
+                              </button>
                             <button 
                               className="btn btn-danger" 
                               style={{ padding: '0.4rem 0.6rem', fontSize: '0.75rem', background: '#dc3545', color: 'white', border: 'none' }}
@@ -505,6 +535,57 @@ function Consumers() {
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '0.25rem' }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
                 Download PNG
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Analytics Modal */}
+      {analyticsConsumer && (
+        <div className="modal-overlay">
+          <div className="modal-card" style={{ maxWidth: '600px' }}>
+            <div className="modal-header">
+              <h3 className="modal-title">Analytics: {analyticsConsumer.name}</h3>
+              <button className="close-btn" onClick={() => setAnalyticsConsumer(null)}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              </button>
+            </div>
+            <div className="modal-body">
+              {loadingAnalytics ? (
+                <div style={{ textAlign: 'center', padding: '2rem' }}>Loading analytics...</div>
+              ) : analyticsData ? (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div className="stat-card">
+                    <div className="stat-title">Total Bills Generated</div>
+                    <div className="stat-value">{analyticsData.total_bills}</div>
+                  </div>
+                  {!isFlat && (
+                    <div className="stat-card">
+                      <div className="stat-title">Total Consumption (All Time)</div>
+                      <div className="stat-value">{analyticsData.total_consumption.toFixed(1)} m³</div>
+                    </div>
+                  )}
+                  <div className="stat-card">
+                    <div className="stat-title">Total Billed</div>
+                    <div className="stat-value" style={{ color: 'var(--primary)' }}>₱{analyticsData.total_billed.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
+                  </div>
+                  <div className="stat-card">
+                    <div className="stat-title">Total Paid</div>
+                    <div className="stat-value" style={{ color: 'var(--success)' }}>₱{analyticsData.total_paid.toLocaleString(undefined, {minimumFractionDigits: 2})}</div>
+                  </div>
+                  <div className="stat-card" style={{ gridColumn: '1 / -1' }}>
+                    <div className="stat-title">Pending Balance</div>
+                    <div className="stat-value" style={{ color: analyticsData.total_pending > 0 ? 'var(--danger)' : 'var(--text-main)' }}>
+                      ₱{analyticsData.total_pending.toLocaleString(undefined, {minimumFractionDigits: 2})}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: '2rem', color: 'var(--danger)' }}>Failed to load data.</div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-secondary" onClick={() => setAnalyticsConsumer(null)}>Close</button>
             </div>
           </div>
         </div>
