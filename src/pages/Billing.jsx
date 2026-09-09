@@ -14,6 +14,7 @@ function Billing() {
   const [search, setSearch] = useState('');
   const [selectedBills, setSelectedBills] = useState([]);
   const [batchPayLoading, setBatchPayLoading] = useState(false);
+  const userRole = localStorage.getItem('role') || 'ADMIN';
 
   const [showBillModal, setShowBillModal] = useState(false);
   const [showPayModal, setShowPayModal] = useState(false);
@@ -238,7 +239,7 @@ function Billing() {
       <div className="page-header print-hide">
         <h1 className="page-title">Billing & Payments</h1>
         <div className="header-actions">
-          {selectedBills.length > 0 && (
+          {userRole !== 'BRGY_OFFICIAL' && selectedBills.length > 0 && (
             <button 
               className="btn btn-primary" 
               style={{ backgroundColor: 'var(--success)', borderColor: 'var(--success)', marginRight: '1rem' }}
@@ -248,10 +249,12 @@ function Billing() {
               {batchPayLoading ? 'Processing...' : `Pay Selected (${selectedBills.length})`}
             </button>
           )}
+          {userRole !== 'BRGY_OFFICIAL' && (
           <button className="btn btn-primary" onClick={() => setShowBillModal(true)}>
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
             Generate Bill
           </button>
+          )}
         </div>
       </div>
 
@@ -275,7 +278,8 @@ function Billing() {
             <table>
               <thead>
                 <tr>
-                  <th style={{ width: '40px' }}>
+                  {userRole !== 'BRGY_OFFICIAL' && (
+<th style={{ width: '40px' }}>
                     <input 
                       type="checkbox" 
                       onChange={(e) => handleSelectAll(e, bills.filter(b => {
@@ -300,6 +304,7 @@ function Billing() {
                       }).filter(b => b.status !== 'PAID').length}
                     />
                   </th>
+)}
                   <th>ID</th>
                   <th>Consumer</th>
                   <th>Month</th>
@@ -326,7 +331,7 @@ function Billing() {
                          b.id?.toString().includes(term);
                 }).map(bill => (
                   <tr key={bill.id}>
-                    <td>
+                    {userRole !== 'BRGY_OFFICIAL' && (<td>
                       {bill.status !== 'PAID' && (
                         <input 
                           type="checkbox" 
@@ -334,7 +339,7 @@ function Billing() {
                           onChange={() => handleSelectBill(bill.id)}
                         />
                       )}
-                    </td>
+                    </td>)}
                     <td>#{bill.id}</td>
                     <td>{bill.consumer_name}</td>
                     <td>{bill.billing_month}</td>
@@ -345,12 +350,12 @@ function Billing() {
                       <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }} onClick={() => setBillNoticeId(bill.id)}>
                         Print Bill
                       </button>
-                      {!isFlat && (bill.status === 'PENDING' || bill.status === 'PARTIAL') && (
+                      {userRole !== 'BRGY_OFFICIAL' && !isFlat && (bill.status === 'PENDING' || bill.status === 'PARTIAL') && (
                         <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }} onClick={() => openAdjustModal(bill)}>
                           Adjust
                         </button>
                       )}
-                      {(bill.status === 'PENDING' || bill.status === 'PARTIAL') && (
+                      {userRole !== 'BRGY_OFFICIAL' && (bill.status === 'PENDING' || bill.status === 'PARTIAL') && (
                         <button className="btn btn-secondary" style={{ padding: '0.25rem 0.5rem', fontSize: '0.75rem' }} onClick={() => openPayModal(bill)}>
                           {bill.status === 'PARTIAL' ? 'Add Payment' : 'Record Payment'}
                         </button>

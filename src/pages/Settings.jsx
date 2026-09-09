@@ -410,6 +410,7 @@ function Settings() {
                   <div className="form-group">
                     <label className="form-label">Role</label>
                     <select className="form-input" value={newUser.role} onChange={e => setNewUser({...newUser, role: e.target.value})}>
+                      <option value="BRGY_OFFICIAL">BRGY OFFICIAL</option>
                       <option value="STAFF">STAFF</option>
                       <option value="ADMIN">ADMIN</option>
                       <option value="SUPER_ADMIN">SUPER ADMIN</option>

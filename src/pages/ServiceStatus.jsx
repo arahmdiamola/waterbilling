@@ -6,6 +6,7 @@ function ServiceStatus() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('disconnection');
   const [toasts, setToasts] = useState([]);
+  const userRole = localStorage.getItem('role') || 'ADMIN';
 
   const addToast = (message, type = 'success') => {
     const id = Date.now();
@@ -140,7 +141,7 @@ function ServiceStatus() {
                     <th>Oldest Unpaid</th>
                     <th>Total Balance</th>
                     <th>Status</th>
-                    <th>Actions</th>
+                    {userRole !== 'BRGY_OFFICIAL' && <th>Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -165,7 +166,7 @@ function ServiceStatus() {
                           {c.status.replace('_', ' ')}
                         </span>
                       </td>
-                      <td>
+                      {userRole !== 'BRGY_OFFICIAL' && (<td>
                         <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
                           <button
                             className="btn btn-secondary"
@@ -182,7 +183,7 @@ function ServiceStatus() {
                             Mark Repair
                           </button>
                         </div>
-                      </td>
+                      </td>)}
                     </tr>
                   ))}
                 </tbody>
@@ -210,7 +211,7 @@ function ServiceStatus() {
                     <th>Meter #</th>
                     <th>Contact</th>
                     <th>Address</th>
-                    <th>Actions</th>
+                    {userRole !== 'BRGY_OFFICIAL' && <th>Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -221,7 +222,7 @@ function ServiceStatus() {
                       <td style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{c.meter_number || '-'}</td>
                       <td>{c.contact_number || '-'}</td>
                       <td>{c.address || '-'}</td>
-                      <td>
+                      {userRole !== 'BRGY_OFFICIAL' && (<td>
                         <div style={{ display: 'flex', gap: '0.25rem' }}>
                           <button
                             className="btn btn-secondary"
@@ -238,7 +239,7 @@ function ServiceStatus() {
                             Disconnect
                           </button>
                         </div>
-                      </td>
+                      </td>)}
                     </tr>
                   ))}
                 </tbody>
@@ -264,7 +265,7 @@ function ServiceStatus() {
                     <th>Purok</th>
                     <th>Meter #</th>
                     <th>Address</th>
-                    <th>Actions</th>
+                    {userRole !== 'BRGY_OFFICIAL' && <th>Actions</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -274,7 +275,7 @@ function ServiceStatus() {
                       <td>{c.purok || '-'}</td>
                       <td style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{c.meter_number || '-'}</td>
                       <td>{c.address || '-'}</td>
-                      <td>
+                      {userRole !== 'BRGY_OFFICIAL' && (<td>
                         <div style={{ display: 'flex', gap: '0.25rem' }}>
                           <button
                             className="btn btn-secondary"
@@ -291,7 +292,7 @@ function ServiceStatus() {
                             Mark Repair
                           </button>
                         </div>
-                      </td>
+                      </td>)}
                     </tr>
                   ))}
                 </tbody>

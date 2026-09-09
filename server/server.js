@@ -83,6 +83,14 @@ const authenticateToken = (req, res, next) => {
 // Protect all following routes with authentication
 app.use('/api', authenticateToken);
 
+// Block BRGY_OFFICIAL from making any modifications
+app.use('/api', (req, res, next) => {
+  if (req.user && req.user.role === 'BRGY_OFFICIAL' && req.method !== 'GET') {
+    return res.status(403).json({ error: 'Access denied. Barangay Officials have read-only access.' });
+  }
+  next();
+});
+
 // Require SUPER_ADMIN role middleware
 const requireSuperAdmin = (req, res, next) => {
   if (req.user.role !== 'SUPER_ADMIN') {
@@ -91,10 +99,10 @@ const requireSuperAdmin = (req, res, next) => {
   next();
 };
 
-// Require ADMIN or SUPER_ADMIN role middleware (blocks STAFF)
+// Require ADMIN or SUPER_ADMIN role middleware (blocks STAFF and BRGY_OFFICIAL)
 const requireAdmin = (req, res, next) => {
-  if (req.user.role === 'STAFF') {
-    return res.status(403).json({ error: 'Access denied. Staff cannot perform this action.' });
+  if (req.user.role === 'STAFF' || req.user.role === 'BRGY_OFFICIAL') {
+    return res.status(403).json({ error: 'Access denied. Staff and Barangay Officials cannot perform this action.' });
   }
   next();
 };
