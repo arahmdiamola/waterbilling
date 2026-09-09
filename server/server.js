@@ -130,7 +130,7 @@ app.post('/api/users', requireSuperAdmin, async (req, res) => {
   const { username, password, role, assigned_purok } = req.body;
   try {
     if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
-    const userRole = (role === 'SUPER_ADMIN' || role === 'STAFF') ? role : 'ADMIN';
+    const userRole = ['SUPER_ADMIN', 'STAFF', 'BRGY_OFFICIAL'].includes(role) ? role : 'ADMIN';
     const assignedPurok = userRole === 'STAFF' ? (assigned_purok || null) : null;
     const hash = bcrypt.hashSync(password, 10);
     const info = await db.execute({ sql: 'INSERT INTO users (username, password_hash, role, assigned_purok) VALUES (?, ?, ?, ?)', args: [username, hash, userRole, assignedPurok] });
