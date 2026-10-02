@@ -1058,18 +1058,27 @@ app.get('/api/database/backup', requireSuperAdmin, async (req, res) => {
     const tempBackupPath = path.resolve(__dirname, `temp_${backupFileName}`);
     
     const dbPath = path.resolve(__dirname, 'water_billing.db');
+
     if (process.env.TURSO_DATABASE_URL && process.env.TURSO_DATABASE_URL.startsWith('libsql://')) {
-      return res.status(400).json({ error: 'Direct file backup is not supported for remote Turso databases. Please use the Turso dashboard.' });
+      const { createClient } = require('@libsql/client');
+      const syncDb = createClient({
+        url: `file:${tempBackupPath}`,
+        syncUrl: process.env.TURSO_DATABASE_URL,
+        authToken: process.env.TURSO_AUTH_TOKEN
+      });
+      await syncDb.sync();
+      syncDb.close();
+    } else {
+      fs.copyFileSync(dbPath, tempBackupPath);
     }
-    fs.copyFileSync(dbPath, tempBackupPath);
     
     logAudit(req.user.username, 'DATABASE', 'Downloaded a database backup');
 
     res.download(tempBackupPath, backupFileName, (err) => {
-      // Clean up the temporary backup file after download finishes or fails
-      if (fs.existsSync(tempBackupPath)) {
-        fs.unlinkSync(tempBackupPath);
-      }
+      if (fs.existsSync(tempBackupPath)) fs.unlinkSync(tempBackupPath);
+      // Clean up WAL/SHM files left by libsql if any
+      if (fs.existsSync(tempBackupPath + '-wal')) fs.unlinkSync(tempBackupPath + '-wal');
+      if (fs.existsSync(tempBackupPath + '-shm')) fs.unlinkSync(tempBackupPath + '-shm');
     });
   } catch (error) {
     res.status(500).json({ error: 'Failed to generate backup: ' + error.message });
