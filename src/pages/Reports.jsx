@@ -291,7 +291,7 @@ function Reports() {
                     <tr>
                       <th>Consumer</th>
                       <th>Total Unpaid</th>
-                      <th>Oldest Unpaid Month</th>
+                      <th>Unpaid Months</th>
                       <th>Months Overdue</th>
                     </tr>
                   </thead>
@@ -300,7 +300,7 @@ function Reports() {
                       <tr key={i} className={record.months_overdue >= 3 ? 'aging-row-severe' : ''}>
                         <td>{record.consumer_name}</td>
                         <td style={{ fontWeight: 500, color: 'var(--danger)' }}>₱{Number(record.total_unpaid).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                        <td>{record.oldest_unpaid_month}</td>
+                        <td>{record.unpaid_months}</td>
                         <td>
                           {record.months_overdue >= 3 ? (
                             <span className="badge danger">{record.months_overdue} Months</span>

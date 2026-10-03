@@ -853,7 +853,7 @@ app.get('/api/reports/aging', async (req, res) => {
     let query = `
       SELECT c.id as consumer_id, c.name as consumer_name,
              SUM(b.amount_due - IFNULL((SELECT SUM(amount_paid) FROM payments WHERE billing_id = b.id), 0)) as total_unpaid,
-             MIN(b.billing_month) as oldest_unpaid_month,
+             GROUP_CONCAT(b.billing_month, ', ') as unpaid_months,
              COUNT(b.id) as months_overdue
       FROM billings b
       JOIN consumers c ON b.consumer_id = c.id
