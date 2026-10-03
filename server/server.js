@@ -204,13 +204,24 @@ app.put('/api/consumers/:id', requireSuperAdmin, async (req, res) => {
 app.delete('/api/consumers/:id', requireSuperAdmin, async (req, res) => {
   const { id } = req.params;
   try {
-    const billings = await db.execute({ sql: 'SELECT id FROM billings WHERE consumer_id = ? LIMIT 1', args: [id] });
-    if (billings.rows.length > 0) {
-      return res.status(400).json({ error: 'Cannot delete consumer with existing billing records' });
+    const tx = await db.transaction('write');
+    
+    // Find all billings for this consumer to delete associated payments
+    const billings = (await tx.execute({ sql: 'SELECT id FROM billings WHERE consumer_id = ?', args: [id] })).rows;
+    for (const b of billings) {
+      await tx.execute({ sql: 'DELETE FROM payments WHERE billing_id = ?', args: [b.id] });
     }
-    await db.execute({ sql: 'DELETE FROM consumers WHERE id = ?', args: [id] });
-    logAudit(req.user.username, 'CONSUMERS', `Deleted consumer ID: ${id}`);
-    res.json({ message: 'Consumer deleted successfully' });
+    
+    // Delete billings
+    await tx.execute({ sql: 'DELETE FROM billings WHERE consumer_id = ?', args: [id] });
+    
+    // Delete consumer
+    await tx.execute({ sql: 'DELETE FROM consumers WHERE id = ?', args: [id] });
+    
+    await tx.commit();
+    
+    logAudit(req.user.username, 'CONSUMERS', `Deleted consumer ID: ${id} and all associated records`);
+    res.json({ message: 'Consumer and all associated records deleted successfully' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
